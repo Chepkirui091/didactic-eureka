@@ -1,4 +1,18 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Habit Flow
+
+A habit tracking system that helps you build consistency, understand patterns, and stay motivated—with a compassionate, non-guilt UX (complete / skip / miss).
+
+## Features
+
+- **Dashboard** — Today’s habits, daily goal progress, streaks, quick links.
+- **Habits** — List and detail views; binary, quantitative, and timed habits; categories and scheduling (daily, weekly, custom).
+- **Progress** — Streaks (current/longest), completion rate, GitHub-style activity heatmap.
+- **Analytics** — Completion by habit, weekly patterns, insights (e.g. most skipped habits).
+- **Reminders** — Placeholder UI for time-based and end-of-day reminders.
+- **Achievements** — Badges and milestones (e.g. 7-day streak, 30-day reader).
+- **Settings** — Light/dark/system theme and accent color.
+
+The app runs with **dummy data** by default (no database required). Data layer: `src/lib/dummy-data.ts` and `src/lib/api-store.ts`. API routes under `/api/habits` use the in-memory store; connect Prisma and run migrations when you want a real DB.
 
 ## Getting Started
 

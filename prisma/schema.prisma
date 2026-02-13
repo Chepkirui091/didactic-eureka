@@ -1,22 +1,101 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Habit Tracker - Full schema
+// Run: npx prisma generate (and migrate when DB is ready)
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
   provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
-model Habit {
-  id             Int      @id @default(autoincrement())
-  name           String
-  completedToday Boolean  @default(false)
-  week           Json     @default("[]") // we'll default to a 7-element array later in app logic
+// ---- User & preferences ----
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  preferences UserPreferences?
+  habits      Habit[]
+  reminders   Reminder[]
+}
+
+model UserPreferences {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  theme          String   @default("system") // light | dark | system
+  accentColor    String   @default("emerald")
+  weekStartsOn   Int      @default(0) // 0 = Sunday, 1 = Monday
+  timezone       String   @default("UTC")
+  fontSize       String   @default("medium")
+  highContrast   Boolean  @default(false)
+  stopReminderWhenDone Boolean @default(true)
+  endOfDayRecap  Boolean  @default(true)
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// ---- Core habits ----
+model Habit {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  motivation  String?   // why it matters
+  category    String    @default("general") // health, work, learning, finance, mental, general
+  icon        String?   // emoji or icon name
+  sortOrder   Int       @default(0)
+
+  // Type: binary | quantitative | timed
+  habitType   String    @default("binary")
+  targetValue Float?   // e.g. 30 pages, 10000 steps
+  targetUnit  String?   // pages, steps, min
+  targetDurationMinutes Int? // for timed (e.g. 15)
+
+  startDate   DateTime  @default(now())
+  endDate    DateTime?
+  schedule   Json      @default("{}") // { frequency: "daily"|"weekly"|"monthly"|"custom", daysOfWeek?: number[], intervalDays?: number, timesPerDay?: number }
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  entries     HabitEntry[]
+  reminders   Reminder[]
+}
+
+// Per-day (or per-occurrence) log
+model HabitEntry {
+  id        String   @id @default(cuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  status    String   @default("pending") // completed | missed | skipped | pending
+  value     Float?   // for quantitative (e.g. 25 pages)
+  durationMinutes Int? // for timed
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([habitId, date])
+  @@index([habitId, date])
+}
+
+model Reminder {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  habitId     String?
+  habit       Habit?   @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  time        String   // "09:00" or "09:00,18:00"
+  message     String?
+  strict      Boolean  @default(false)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
