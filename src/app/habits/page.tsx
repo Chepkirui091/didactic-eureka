@@ -3,10 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Plus, Flame, ChevronRight, GripVertical, Pencil, Trash2 } from "lucide-react";
-import { computeStreak, getEntriesForHabit } from "@/lib/dummy-data";
+import { computeStreakFromEntries, todayString } from "@/lib/streak";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { HabitFormModal } from "@/components/habit-form-modal";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import type { Habit as HabitType } from "@/lib/types";
+import type { Habit as HabitType, HabitEntry } from "@/lib/types";
 
 const CATEGORY_LABELS: Record<string, string> = {
   health: "Health",
@@ -19,15 +20,16 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 function HabitRow({
   habit,
+  entries,
   onEdit,
   onDelete,
 }: {
   habit: HabitType;
+  entries: HabitEntry[];
   onEdit: (h: HabitType) => void;
   onDelete: (h: HabitType) => void;
 }) {
-  const streak = computeStreak(habit.id);
-  const entries = getEntriesForHabit(habit.id);
+  const streak = computeStreakFromEntries(entries);
   const completed = entries.filter((e) => e.status === "completed").length;
   const total = entries.length;
   const rate = total ? Math.round((completed / total) * 100) : 0;
@@ -92,21 +94,27 @@ function HabitRow({
 
 export default function HabitsPage() {
   const [habits, setHabits] = useState<HabitType[]>([]);
+  const [allEntries, setAllEntries] = useState<HabitEntry[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingHabit, setEditingHabit] = useState<HabitType | null>(null);
   const [habitToDelete, setHabitToDelete] = useState<HabitType | null>(null);
 
   const fetchHabits = useCallback(async () => {
-    const res = await fetch("/api/habits");
-    if (res.ok) {
-      const data = await res.json();
+    const [habitsRes, entriesRes] = await Promise.all([
+      fetch("/api/habits"),
+      fetch("/api/entries?daysBack=60"),
+    ]);
+    if (habitsRes.ok) {
+      const data = await habitsRes.json();
       setHabits(Array.isArray(data) ? data : []);
+    }
+    if (entriesRes.ok) {
+      const data = await entriesRes.json();
+      setAllEntries(Array.isArray(data) ? data : []);
     }
   }, []);
 
-  useEffect(() => {
-    fetchHabits();
-  }, [fetchHabits]);
+  useLiveRefresh(fetchHabits, [fetchHabits]);
 
   const openAdd = () => {
     setEditingHabit(null);
@@ -172,7 +180,13 @@ export default function HabitsPage() {
           </div>
         ) : (
           habits.map((habit) => (
-            <HabitRow key={habit.id} habit={habit} onEdit={openEdit} onDelete={handleDeleteClick} />
+            <HabitRow
+              key={habit.id}
+              habit={habit}
+              entries={allEntries.filter((e) => e.habitId === habit.id)}
+              onEdit={openEdit}
+              onDelete={handleDeleteClick}
+            />
           ))
         )}
       </div>

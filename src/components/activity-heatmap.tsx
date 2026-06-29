@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
-import { getActivityCountByDate } from "@/lib/dummy-data";
+import { useEffect, useMemo, useState } from "react";
 
 const WEEKS = 14;
 const DAYS_TOTAL = WEEKS * 7;
@@ -17,8 +16,20 @@ function getHeatLevel(count: number, maxCount: number): 0 | 1 | 2 | 3 | 4 {
 }
 
 export function ActivityHeatmap() {
+  const [activity, setActivity] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const load = () => {
+      fetch(`/api/entries?activity=${DAYS_TOTAL}`)
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((data) => setActivity(data ?? {}));
+    };
+    load();
+    const timer = setInterval(load, 20_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const { cells, maxCount } = useMemo(() => {
-    const activity = getActivityCountByDate(DAYS_TOTAL);
     const today = new Date().toISOString().slice(0, 10);
     const start = new Date(today);
     start.setDate(start.getDate() - DAYS_TOTAL + 1);
@@ -30,14 +41,17 @@ export function ActivityHeatmap() {
       dates.push(d.toISOString().slice(0, 10));
     }
     let max = 0;
-    for (const [, c] of activity) if (c > max) max = c;
+    for (const date of dates) {
+      const c = activity[date] ?? 0;
+      if (c > max) max = c;
+    }
     const cells = dates.map((date) => ({
       date,
-      count: activity.get(date) ?? 0,
-      level: getHeatLevel(activity.get(date) ?? 0, max || 1),
+      count: activity[date] ?? 0,
+      level: getHeatLevel(activity[date] ?? 0, max || 1),
     }));
     return { cells, maxCount: max };
-  }, []);
+  }, [activity]);
 
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 

@@ -1,23 +1,39 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { BarChart3, Calendar, Lightbulb } from "lucide-react";
-import {
-  dummyHabits,
-  getEntriesForHabit,
-  computeStreak,
-  dummyToday,
-  dummyEntries,
-} from "@/lib/dummy-data";
+import { computeStreakFromEntries } from "@/lib/streak";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import type { Habit, HabitEntry } from "@/lib/types";
 
 export default function AnalyticsPage() {
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [allEntries, setAllEntries] = useState<HabitEntry[]>([]);
+
+  const refresh = useCallback(async () => {
+    const [habitsRes, entriesRes] = await Promise.all([
+      fetch("/api/habits"),
+      fetch("/api/entries?daysBack=90"),
+    ]);
+    if (habitsRes.ok) {
+      const data = await habitsRes.json();
+      setHabits(Array.isArray(data) ? data : []);
+    }
+    if (entriesRes.ok) {
+      const data = await entriesRes.json();
+      setAllEntries(Array.isArray(data) ? data : []);
+    }
+  }, []);
+
+  useLiveRefresh(refresh, [refresh]);
+
   const habitsWithStats = useMemo(() => {
-    return dummyHabits.map((h) => {
-      const entries = getEntriesForHabit(h.id);
+    return habits.map((h) => {
+      const entries = allEntries.filter((e) => e.habitId === h.id);
       const completed = entries.filter((e) => e.status === "completed").length;
       const total = entries.length;
       const rate = total ? Math.round((completed / total) * 100) : 0;
-      const streak = computeStreak(h.id);
+      const streak = computeStreakFromEntries(entries);
       return {
         ...h,
         completionRate: rate,
@@ -27,11 +43,11 @@ export default function AnalyticsPage() {
         streakLongest: streak.longest,
       };
     });
-  }, []);
+  }, [habits, allEntries]);
 
   const mostSkipped = useMemo(() => {
     const byHabit = new Map<string, number>();
-    for (const e of dummyEntries) {
+    for (const e of allEntries) {
       if (e.status === "skipped") {
         byHabit.set(e.habitId, (byHabit.get(e.habitId) ?? 0) + 1);
       }
@@ -39,124 +55,158 @@ export default function AnalyticsPage() {
     return [...byHabit.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
-      .map(([habitId]) => dummyHabits.find((h) => h.id === habitId)?.name ?? habitId);
-  }, []);
+      .map(([habitId]) => habits.find((h) => h.id === habitId)?.name ?? habitId);
+  }, [allEntries, habits]);
 
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const byWeekday = useMemo(() => {
     const count = [0, 0, 0, 0, 0, 0, 0];
-    for (const e of dummyEntries) {
+    for (const e of allEntries) {
       if (e.status === "completed") {
         const d = new Date(e.date).getDay();
-        count[d]++;
+        count[d] += 1;
       }
     }
-    return count;
-  }, []);
+    const max = Math.max(...count, 1);
+    return weekdays.map((label, i) => ({
+      label,
+      count: count[i],
+      pct: Math.round((count[i] / max) * 100),
+    }));
+  }, [allEntries]);
 
-  const maxWeekday = Math.max(...byWeekday, 1);
+  const today = new Date().toISOString().slice(0, 10);
+  const weekStart = new Date(today);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const weekStartStr = weekStart.toISOString().slice(0, 10);
+
+  const weekStats = useMemo(() => {
+    let completed = 0;
+    let total = 0;
+    for (const e of allEntries) {
+      if (e.date >= weekStartStr && e.date <= today) {
+        total += 1;
+        if (e.status === "completed") completed += 1;
+      }
+    }
+    return { completed, total, pct: total ? Math.round((completed / total) * 100) : 0 };
+  }, [allEntries, today, weekStartStr]);
 
   return (
     <div className="space-y-8">
       <header>
-        <h1 className="text-2xl font-bold">Analytics & insights</h1>
+        <h1 className="text-2xl font-bold">Analytics</h1>
         <p className="text-[var(--muted)] mt-1">
-          Understand your patterns and improve consistency.
+          Patterns, streaks, and insights from your habit data.
         </p>
       </header>
 
-      {/* Completion by habit */}
-      <section>
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div
+          className="rounded-xl border p-4"
+          style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+        >
+          <p className="text-xs text-[var(--muted)] uppercase tracking-wide">This week</p>
+          <p className="text-2xl font-bold mt-1">{weekStats.pct}%</p>
+          <p className="text-xs text-[var(--muted)] mt-0.5">
+            {weekStats.completed}/{weekStats.total} completed
+          </p>
+        </div>
+        <div
+          className="rounded-xl border p-4"
+          style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+        >
+          <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Active habits</p>
+          <p className="text-2xl font-bold mt-1">{habits.length}</p>
+        </div>
+        <div
+          className="rounded-xl border p-4"
+          style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+        >
+          <p className="text-xs text-[var(--muted)] uppercase tracking-wide">Logged days</p>
+          <p className="text-2xl font-bold mt-1">{allEntries.length}</p>
+        </div>
+      </section>
+
+      <section
+        className="rounded-xl border p-5"
+        style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+      >
         <h2 className="font-semibold flex items-center gap-2 mb-4">
           <BarChart3 className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
           Completion by habit
         </h2>
-        <div
-          className="rounded-xl border overflow-hidden"
-          style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
-        >
-          <div className="divide-y" style={{ borderColor: "var(--border)" }}>
-            {habitsWithStats.map((h) => (
-              <div
-                key={h.id}
-                className="flex items-center gap-4 p-4"
-              >
-                <span className="text-xl shrink-0">{h.icon ?? "✨"}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{h.name}</p>
-                  <div className="h-2 rounded-full bg-[var(--border)] mt-1 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${h.completionRate}%`,
-                        background: "hsl(var(--accent))",
-                      }}
-                    />
-                  </div>
-                </div>
-                <span className="text-sm font-medium shrink-0">
-                  {h.completionRate}%
-                </span>
+        <div className="space-y-4">
+          {habitsWithStats.map((h) => (
+            <div key={h.id}>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium">{h.icon} {h.name}</span>
+                <span className="text-[var(--muted)]">{h.completionRate}%</span>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Weekly pattern */}
-      <section>
-        <h2 className="font-semibold flex items-center gap-2 mb-4">
-          <Calendar className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
-          Weekly pattern
-        </h2>
-        <p className="text-sm text-[var(--muted)] mb-3">
-          When you complete habits most (last 60 days).
-        </p>
-        <div className="flex gap-2 items-end h-32">
-          {weekdays.map((day, i) => (
-            <div key={day} className="flex-1 flex flex-col items-center gap-1">
-              <div
-                className="w-full rounded-t transition-all min-h-[4px]"
-                style={{
-                  height: `${(byWeekday[i] / maxWeekday) * 100}%`,
-                  background: "hsl(var(--accent))",
-                }}
-              />
-              <span className="text-xs text-[var(--muted)]">{day}</span>
+              <div className="h-2 rounded-full bg-[var(--border)] overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${h.completionRate}%`,
+                    background: "hsl(var(--accent))",
+                  }}
+                />
+              </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Insights */}
-      <section>
+      <section
+        className="rounded-xl border p-5"
+        style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+      >
         <h2 className="font-semibold flex items-center gap-2 mb-4">
+          <Calendar className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
+          Best days of the week
+        </h2>
+        <div className="flex items-end gap-2 h-32">
+          {byWeekday.map((d) => (
+            <div key={d.label} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className="w-full rounded-t-sm"
+                style={{
+                  height: `${Math.max(d.pct, 4)}%`,
+                  background: "hsl(var(--accent))",
+                }}
+              />
+              <span className="text-xs text-[var(--muted)]">{d.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section
+        className="rounded-xl border p-5"
+        style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+      >
+        <h2 className="font-semibold flex items-center gap-2 mb-3">
           <Lightbulb className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
           Insights
         </h2>
-        <div className="space-y-3">
+        <ul className="space-y-2 text-sm text-[var(--muted)]">
           {mostSkipped.length > 0 && (
-            <div
-              className="rounded-xl border p-4"
-              style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
-            >
-              <p className="text-sm font-medium">Most skipped habits</p>
-              <p className="text-sm text-[var(--muted)] mt-1">
-                Consider reducing frequency or pairing with an anchor habit:{" "}
-                {mostSkipped.join(", ")}.
-              </p>
-            </div>
+            <li>
+              Most skipped:{" "}
+              <span className="text-[var(--foreground)]">{mostSkipped.join(", ")}</span>.
+              Consider making these easier or rescheduling them.
+            </li>
           )}
-          <div
-            className="rounded-xl border p-4"
-            style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
-          >
-            <p className="text-sm font-medium">Recommendation</p>
-            <p className="text-sm text-[var(--muted)] mt-1">
-              You have {dummyHabits.length} habits. If you feel overloaded, try focusing on 3–5 at a time and add more once they feel automatic.
-            </p>
-          </div>
-        </div>
+          {habitsWithStats.length > 0 && (
+            <li>
+              Strongest habit:{" "}
+              <span className="text-[var(--foreground)]">
+                {[...habitsWithStats].sort((a, b) => b.completionRate - a.completionRate)[0]?.name}
+              </span>
+              .
+            </li>
+          )}
+        </ul>
       </section>
     </div>
   );
