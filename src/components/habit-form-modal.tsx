@@ -4,6 +4,9 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { HabitForm } from "./habit-form";
 import type { Habit } from "@/lib/types";
+import { isFallbackResponse, readApiError } from "@/lib/api-response";
+import { invalidateHabitRelatedCaches } from "@/lib/client-cache";
+import { toastError, toastSavedToDb, toastSuccess } from "@/lib/toast-messages";
 
 interface HabitFormModalProps {
   open: boolean;
@@ -29,19 +32,25 @@ export function HabitFormModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error("Failed to update");
+        if (!res.ok) throw new Error(await readApiError(res));
+        if (!isFallbackResponse(res)) toastSavedToDb("Habit updated");
+        else toastSuccess("Habit updated (offline mode)");
+        invalidateHabitRelatedCaches(initialHabit.id);
       } else {
         const res = await fetch("/api/habits", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error("Failed to create");
+        if (!res.ok) throw new Error(await readApiError(res));
+        if (!isFallbackResponse(res)) toastSavedToDb("Habit created");
+        else toastSuccess("Habit created (offline mode)");
+        invalidateHabitRelatedCaches();
       }
       onSuccess();
       onClose();
     } catch (e) {
-      console.error(e);
+      toastError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setIsSubmitting(false);
     }

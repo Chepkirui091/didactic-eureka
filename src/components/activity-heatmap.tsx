@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
+import { getActivityByDate } from "@/lib/data-api";
+import { CacheKeys } from "@/lib/client-cache";
+import { useCachedData } from "@/hooks/use-cached-data";
 
 const WEEKS = 14;
 const DAYS_TOTAL = WEEKS * 7;
@@ -16,18 +19,15 @@ function getHeatLevel(count: number, maxCount: number): 0 | 1 | 2 | 3 | 4 {
 }
 
 export function ActivityHeatmap() {
-  const [activity, setActivity] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    const load = () => {
-      fetch(`/api/entries?activity=${DAYS_TOTAL}`)
-        .then((r) => (r.ok ? r.json() : {}))
-        .then((data) => setActivity(data ?? {}));
-    };
-    load();
-    const timer = setInterval(load, 20_000);
-    return () => clearInterval(timer);
-  }, []);
+  const fetcher = useCallback(
+    (force: boolean) => getActivityByDate(DAYS_TOTAL, force),
+    [],
+  );
+  const { data: activityRaw = {} } = useCachedData<Record<string, number>>(
+    CacheKeys.activity(DAYS_TOTAL),
+    fetcher,
+  );
+  const activity = activityRaw ?? {};
 
   const { cells, maxCount } = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);

@@ -1,51 +1,21 @@
 "use client";
 
-import { useMemo, useState, useCallback, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { Flame, Target, ChevronRight, TrendingUp, Award, Compass } from "lucide-react";
 import { ActivityHeatmap } from "@/components/activity-heatmap";
 import { EntryActionsMenu } from "@/components/entry-actions-menu";
 import {
   dummyHabits,
-  getTodaysEntries,
   dummyToday,
   computeStreak,
   getEntriesForHabit,
 } from "@/lib/dummy-data";
 import { getQuoteForDate } from "@/lib/quotes";
-import type { Habit as HabitType, HabitEntry, EntryStatus, RoadmapOverview } from "@/lib/types";
-
-// Local overrides for today's entries (so Done/Skip/Miss update UI immediately)
-function useTodaysEntriesWithOverrides() {
-  const base = getTodaysEntries();
-  const [overrides, setOverrides] = useState<Record<string, EntryStatus>>({});
-  const entries: HabitEntry[] = useMemo(() => {
-    const byHabit = new Map(base.map((e) => [e.habitId, e]));
-    for (const [habitId, status] of Object.entries(overrides)) {
-      byHabit.set(habitId, {
-        ...(byHabit.get(habitId) ?? {
-          id: `local-${habitId}`,
-          habitId,
-          date: dummyToday,
-          status: "pending",
-          createdAt: dummyToday,
-          updatedAt: dummyToday,
-        }),
-        status,
-      });
-    }
-    return [...byHabit.values()];
-  }, [base, overrides]);
-  const setStatus = useCallback((habitId: string, status: EntryStatus) => {
-    setOverrides((prev) => ({ ...prev, [habitId]: status }));
-    fetch(`/api/habits/${habitId}/complete`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    }).catch(() => {});
-  }, []);
-  return { entries, setStatus };
-}
+import { useTodayEntries } from "@/hooks/use-today-entries";
+import { useRoadmap } from "@/hooks/use-roadmap";
+import { useHabits } from "@/hooks/use-habits";
+import type { Habit as HabitType, HabitEntry, EntryStatus } from "@/lib/types";
 
 function TodayHabitCard({
   habit,
@@ -101,18 +71,28 @@ function TodayHabitCard({
 }
 
 export default function DashboardPage() {
-  const { entries: todaysEntries, setStatus } = useTodaysEntriesWithOverrides();
-  const [habitsList, setHabitsList] = useState<HabitType[]>([]);
+  const { habits: habitsList } = useHabits();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    fetch("/api/habits")
-      .then((r) => r.ok ? r.json() : [])
-      .then((data) => setHabitsList(Array.isArray(data) ? data : dummyHabits));
   }, []);
 
   const habitsForToday = habitsList.length ? habitsList : dummyHabits;
+
+  const schedule = useMemo(() => habitsForToday.filter((h) => {
+    const s = h.schedule as { frequency: string; daysOfWeek?: number[] };
+    if (s.frequency === "daily") return true;
+    if (s.frequency === "weekly" && s.daysOfWeek) {
+      const day = new Date(dummyToday).getDay();
+      return s.daysOfWeek.includes(day);
+    }
+    return true;
+  }), [habitsForToday]);
+
+  const scheduledIds = useMemo(() => schedule.map((h) => h.id), [schedule]);
+  const { entries: todaysEntries, setStatus } = useTodayEntries(scheduledIds);
+  const { roadmap } = useRoadmap();
   const goal = useMemo(() => {
     const total = habitsForToday.filter((h) => {
       const s = h.schedule as { frequency: string; daysOfWeek?: number[] };
@@ -126,16 +106,6 @@ export default function DashboardPage() {
     const completed = todaysEntries.filter((e) => e.status === "completed").length;
     return { total, completed, percentage: total ? Math.round((completed / total) * 100) : 0 };
   }, [todaysEntries, habitsForToday]);
-
-  const schedule = habitsForToday.filter((h) => {
-    const s = h.schedule as { frequency: string; daysOfWeek?: number[] };
-    if (s.frequency === "daily") return true;
-    if (s.frequency === "weekly" && s.daysOfWeek) {
-      const day = new Date(dummyToday).getDay();
-      return s.daysOfWeek.includes(day);
-    }
-    return true;
-  });
 
   const getEntry = (habitId: string) => todaysEntries.find((e) => e.habitId === habitId);
 
@@ -163,13 +133,6 @@ export default function DashboardPage() {
   const [quote, setQuote] = useState("Progress, not perfection.");
   useEffect(() => {
     setQuote(getQuoteForDate(new Date().toISOString().slice(0, 10)));
-  }, []);
-
-  const [roadmap, setRoadmap] = useState<RoadmapOverview | null>(null);
-  useEffect(() => {
-    fetch("/api/roadmap")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setRoadmap(data));
   }, []);
 
   const dashboardMetrics = useMemo(() => {

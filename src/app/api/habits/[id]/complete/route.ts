@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isDatabaseConfigured } from "@/lib/prisma";
+import { jsonWithSource, resolveDataSource, withDatabase } from "@/lib/api-db";
 import { upsertEntry, todayString } from "@/lib/habits-db";
 import { dummyToday } from "@/lib/dummy-data";
 import { setEntry } from "@/lib/api-store";
@@ -17,18 +17,17 @@ export async function PATCH(
   }
 
   const date = body?.date ?? todayString();
+  const source = await resolveDataSource();
 
-  if (!isDatabaseConfigured()) {
+  if (source === "fallback") {
     const entry = setEntry(habitId, date === todayString() ? dummyToday : date, status);
-    return NextResponse.json(entry);
+    return jsonWithSource(entry, "fallback");
   }
 
-  try {
-    const entry = await upsertEntry(habitId, date, status);
-    if (!entry) return NextResponse.json({ error: "Habit not found" }, { status: 404 });
-    return NextResponse.json(entry);
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Database error" }, { status: 500 });
+  const result = await withDatabase(() => upsertEntry(habitId, date, status));
+  if (!result.ok) {
+    return NextResponse.json({ error: result.message }, { status: 503 });
   }
+  if (!result.value) return NextResponse.json({ error: "Habit not found" }, { status: 404 });
+  return jsonWithSource(result.value, "database");
 }

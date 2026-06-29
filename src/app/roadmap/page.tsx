@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
   Compass,
@@ -13,31 +12,13 @@ import {
   Lock,
   Flame,
 } from "lucide-react";
-import type { RoadmapOverview } from "@/lib/types";
 import { TIME_BLOCKS, WEEK_GOALS, formatTimeRange, isDayUnlocked } from "@/lib/nestjs-roadmap-data";
 import { TimeBlockCard } from "@/components/time-block-card";
 import { RoadmapActivityHeatmap } from "@/components/roadmap-activity-heatmap";
+import { useRoadmap } from "@/hooks/use-roadmap";
 
 export default function RoadmapPage() {
-  const [roadmap, setRoadmap] = useState<RoadmapOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(() => {
-    fetch("/api/roadmap")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setRoadmap(data))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const handleStart = () => {
-    fetch("/api/roadmap", { method: "POST" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => data && setRoadmap(data));
-  };
+  const { roadmap, loading, startRoadmap, updateBlock } = useRoadmap();
 
   if (loading) {
     return <p className="text-[var(--muted)]">Loading roadmap…</p>;
@@ -65,7 +46,7 @@ export default function RoadmapPage() {
           {!roadmap.startedAt && (
             <button
               type="button"
-              onClick={handleStart}
+              onClick={startRoadmap}
               className="px-4 py-2 rounded-lg text-sm font-medium text-white shrink-0 hover:opacity-90"
               style={{ background: "hsl(var(--accent))" }}
             >
@@ -168,7 +149,7 @@ export default function RoadmapPage() {
       </section>
 
       {/* Today's focus */}
-      {currentDayData && (
+      {currentDayData && currentProgress && (
         <section>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-lg flex items-center gap-2">
@@ -187,28 +168,19 @@ export default function RoadmapPage() {
             <span className="font-medium text-[var(--foreground)]">Task:</span>{" "}
             {currentDayData.task}
           </p>
-          {currentProgress && (
-            <div className="space-y-2">
-              {TIME_BLOCKS.map((block) => (
-                <TimeBlockCard
-                  key={block.id}
-                  block={block}
-                  status={currentProgress.blocks[block.id]}
-                  compact
-                  onComplete={() => {}}
-                  onSkip={() => {}}
-                  onMiss={() => {}}
-                />
-              ))}
-            </div>
-          )}
-          <p className="text-xs text-[var(--muted)] mt-2">
-            Mark blocks done on the{" "}
-            <Link href={`/roadmap/${roadmap.currentDay}`} className="underline">
-              day detail page
-            </Link>
-            .
-          </p>
+          <div className="space-y-2">
+            {TIME_BLOCKS.map((block) => (
+              <TimeBlockCard
+                key={block.id}
+                block={block}
+                status={currentProgress.blocks[block.id]}
+                compact
+                onComplete={() => updateBlock(roadmap.currentDay, block.id, "completed")}
+                onSkip={() => updateBlock(roadmap.currentDay, block.id, "skipped")}
+                onMiss={() => updateBlock(roadmap.currentDay, block.id, "missed")}
+              />
+            ))}
+          </div>
         </section>
       )}
 
