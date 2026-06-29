@@ -22,6 +22,7 @@ model User {
   preferences UserPreferences?
   habits      Habit[]
   reminders   Reminder[]
+  roadmapProgress RoadmapDayProgress[]
 }
 
 model UserPreferences {
@@ -98,4 +99,23 @@ model Reminder {
   enabled     Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ---- NestJS 30-Day Roadmap progress ----
+model RoadmapDayProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roadmapId   String   @default("nestjs-30-day")
+  dayNumber   Int      // 1-30
+  blocks      Json     @default("{}") // { learn: "completed", rebuild: "pending", build: "pending", test: "pending" }
+  notes       String?  @db.Text
+  builtItems  String?  @db.Text  // what you built today
+  learnNotes  String?  @db.Text  // notes from learn session
+  dayCompleted Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, roadmapId, dayNumber])
+  @@index([userId, roadmapId])
 }

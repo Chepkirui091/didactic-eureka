@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Habit Flow — Build consistency, stay compassionate",
+  title: "Habit Flow - Build consistency, stay compassionate",
   description: "Habit tracking with streaks, analytics, and gentle reminders",
 };
 
