@@ -4,12 +4,8 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Flame, Calendar, Target, Pencil, Trash2 } from "lucide-react";
-import {
-  dummyHabits,
-  getEntriesForHabit,
-  computeStreak,
-  dummyToday,
-} from "@/lib/dummy-data";
+import { computeStreakFromEntries, todayString } from "@/lib/streak";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { HabitFormModal } from "@/components/habit-form-modal";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { Habit as HabitType, HabitEntry } from "@/lib/types";
@@ -35,7 +31,7 @@ function Heatmap({ entries }: { entries: HabitEntry[] }) {
 
   const days = useMemo(() => {
     const out: { date: string; completed: boolean }[] = [];
-    const end = new Date(dummyToday);
+    const end = new Date(todayString());
     for (let i = 83; i >= 0; i--) {
       const d = new Date(end);
       d.setDate(d.getDate() - i);
@@ -67,6 +63,7 @@ export default function HabitDetailPage({
 }) {
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
   const [habit, setHabit] = useState<HabitType | null>(null);
+  const [entries, setEntries] = useState<HabitEntry[]>([]);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const router = useRouter();
@@ -78,22 +75,24 @@ export default function HabitDetailPage({
 
   const fetchHabit = useCallback(async () => {
     if (!id) return;
-    const res = await fetch(`/api/habits/${id}`);
-    if (res.ok) {
-      const data = await res.json();
-      setHabit(data);
+    const [habitRes, entriesRes] = await Promise.all([
+      fetch(`/api/habits/${id}`),
+      fetch(`/api/entries?habitId=${id}`),
+    ]);
+    if (habitRes.ok) {
+      setHabit(await habitRes.json());
     } else {
-      const fallback = dummyHabits.find((h) => h.id === id) ?? null;
-      setHabit(fallback);
+      setHabit(null);
+    }
+    if (entriesRes.ok) {
+      const data = await entriesRes.json();
+      setEntries(Array.isArray(data) ? data : []);
     }
   }, [id]);
 
-  useEffect(() => {
-    if (id) fetchHabit();
-  }, [id, fetchHabit]);
+  useLiveRefresh(fetchHabit, [fetchHabit]);
 
-  const entries = habit ? getEntriesForHabit(habit.id) : [];
-  const streak = habit ? computeStreak(habit.id) : { current: 0, longest: 0 };
+  const streak = habit ? computeStreakFromEntries(entries) : { current: 0, longest: 0 };
   const completed = entries.filter((e) => e.status === "completed").length;
   const total = entries.length;
   const completionRate = total ? Math.round((completed / total) * 100) : 0;
