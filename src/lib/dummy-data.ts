@@ -1,5 +1,5 @@
 /**
- * Dummy data for habit tracker — use to structure the UI and develop without DB.
+ * Dummy data for habit tracker - use to structure the UI and develop without DB.
  * Replace with API calls when backend is ready.
  */
 
@@ -191,7 +191,7 @@ export const dummyReminders: Reminder[] = [
     userId: DUMMY_USER_ID,
     habitId: null,
     time: "21:00",
-    message: "End of day — how did your habits go?",
+    message: "End of day - how did your habits go?",
     strict: false,
     enabled: true,
     createdAt: today,
