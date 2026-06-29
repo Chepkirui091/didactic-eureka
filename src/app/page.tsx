@@ -103,7 +103,10 @@ function TodayHabitCard({
 export default function DashboardPage() {
   const { entries: todaysEntries, setStatus } = useTodaysEntriesWithOverrides();
   const [habitsList, setHabitsList] = useState<HabitType[]>([]);
+  const [mounted, setMounted] = useState(false);
+
   useEffect(() => {
+    setMounted(true);
     fetch("/api/habits")
       .then((r) => r.ok ? r.json() : [])
       .then((data) => setHabitsList(Array.isArray(data) ? data : dummyHabits));
@@ -141,11 +144,21 @@ export default function DashboardPage() {
   const handleMiss = (habitId: string) => setStatus(habitId, "missed");
 
   const greeting = useMemo(() => {
+    if (!mounted) return "Welcome";
     const hour = new Date().getHours();
     if (hour < 12) return "Good morning";
     if (hour < 18) return "Good afternoon";
     return "Good evening";
-  }, []);
+  }, [mounted]);
+
+  const dateLabel = useMemo(() => {
+    if (!mounted) return "";
+    return new Date().toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+  }, [mounted]);
 
   const [quote, setQuote] = useState("Progress, not perfection.");
   useEffect(() => {
@@ -186,12 +199,8 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <header>
         <h1 className="text-2xl font-bold">{greeting}</h1>
-        <p className="text-[var(--muted)] mt-1">
-          {new Date(dummyToday).toLocaleDateString("en-US", {
-            weekday: "long",
-            month: "long",
-            day: "numeric",
-          })}
+        <p className="text-[var(--muted)] mt-1" suppressHydrationWarning>
+          {dateLabel || "\u00a0"}
         </p>
       </header>
 

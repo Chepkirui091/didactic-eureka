@@ -15,27 +15,43 @@ import type {
 const NOW = new Date();
 const today = NOW.toISOString().slice(0, 10);
 
+/** Stable 0–99 score for a habit + date (same on server and client). */
+function deterministicScore(habitId: string, dateStr: string): number {
+  let hash = 0;
+  const key = `${habitId}:${dateStr}`;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  }
+  return hash % 100;
+}
+
 function dateOffset(days: number): string {
   const d = new Date(NOW);
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
 }
 
-// Build entries for last 60 days with realistic patterns
-function buildEntries(habitId: string, completionPattern: (d: Date) => boolean): HabitEntry[] {
+// Build entries for last 60 days with deterministic patterns (SSR-safe)
+function buildEntries(
+  habitId: string,
+  completionRate: number,
+  scheduleFilter?: (d: Date) => boolean,
+): HabitEntry[] {
   const entries: HabitEntry[] = [];
   for (let i = -60; i <= 0; i++) {
     const d = new Date(NOW);
     d.setDate(d.getDate() + i);
     const dateStr = d.toISOString().slice(0, 10);
-    const completed = completionPattern(d);
+    const score = deterministicScore(habitId, dateStr);
+    const passesSchedule = scheduleFilter ? scheduleFilter(d) : true;
+    const completed = passesSchedule && score < completionRate;
     entries.push({
       id: `entry-${habitId}-${dateStr}`,
       habitId,
       date: dateStr,
       status: completed ? "completed" : (i % 7 === 0 ? "skipped" : "missed"),
-      value: completed && habitId === "h2" ? 25 + Math.floor(Math.random() * 15) : null,
-      durationMinutes: completed && habitId === "h3" ? 12 + Math.floor(Math.random() * 8) : null,
+      value: completed && habitId === "h2" ? 25 + (score % 15) : null,
+      durationMinutes: completed && habitId === "h3" ? 12 + (score % 8) : null,
       createdAt: dateStr,
       updatedAt: dateStr,
     });
@@ -156,11 +172,11 @@ export const dummyHabits: Habit[] = [
 
 // Entries: water ~85%, read ~70%, meditate ~65%, exercise on Mon/Wed/Fri, steps ~50%
 export const dummyEntries: HabitEntry[] = [
-  ...buildEntries("h1", (d) => Math.random() < 0.85),
-  ...buildEntries("h2", (d) => Math.random() < 0.7),
-  ...buildEntries("h3", (d) => Math.random() < 0.65),
-  ...buildEntries("h4", (d) => [1, 3, 5].includes(d.getDay()) && Math.random() < 0.8),
-  ...buildEntries("h5", (d) => Math.random() < 0.5),
+  ...buildEntries("h1", 85),
+  ...buildEntries("h2", 70),
+  ...buildEntries("h3", 65),
+  ...buildEntries("h4", 80, (d) => [1, 3, 5].includes(d.getDay())),
+  ...buildEntries("h5", 50),
 ];
 
 export const dummyReminders: Reminder[] = [
