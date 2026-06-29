@@ -103,3 +103,63 @@ export interface DailyGoal {
   completed: number;
   percentage: number;
 }
+
+// ---- NestJS 30-Day Roadmap ----
+
+export type TimeBlockId = "learn" | "rebuild" | "build" | "test";
+
+export interface TimeBlockConfig {
+  id: TimeBlockId;
+  label: string;
+  startTime: string;
+  endTime: string;
+  description: string;
+}
+
+export interface RoadmapDay {
+  dayNumber: number;
+  week: number;
+  weekLabel: string;
+  title: string;
+  goal?: string;
+  topics: string[];
+  task: string;
+  isReviewDay?: boolean;
+  isMiniProject?: boolean;
+}
+
+export interface RoadmapDayProgress {
+  dayNumber: number;
+  blocks: Record<TimeBlockId, EntryStatus>;
+  notes: string;
+  builtItems: string;
+  learnNotes: string;
+  dayCompleted: boolean;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+export interface RoadmapStreaks {
+  days: StreakInfo;
+  study: StreakInfo;
+}
+
+export interface RoadmapOverview {
+  id: string;
+  title: string;
+  description: string;
+  totalDays: number;
+  startedAt: string | null;
+  currentDay: number;
+  days: RoadmapDay[];
+  timeBlocks: TimeBlockConfig[];
+  progress: RoadmapDayProgress[];
+  stats: {
+    daysCompleted: number;
+    blocksCompleted: number;
+    totalBlocks: number;
+    completionPercentage: number;
+  };
+  streaks: RoadmapStreaks;
+  activityByDate: Record<string, number>;
+}

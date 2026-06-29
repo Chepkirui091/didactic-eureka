@@ -11,7 +11,8 @@ import {
   Settings,
   LogOut,
   Search,
-  Sparkles,
+  Menu,
+  X,
 } from "lucide-react";
 import { useTheme } from "./theme-provider";
 import type { Theme } from "./theme-provider";
@@ -24,12 +25,18 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
 
 // Dummy notifications
 const NOTIFICATIONS = [
-  { id: "1", title: "Reminder", body: "Meditate — 7:30 AM", time: "2m ago", read: false },
+  { id: "1", title: "Reminder", body: "Meditate - 7:30 AM", time: "2m ago", read: false },
   { id: "2", title: "Streak", body: "You're on a 5-day streak for Drink Water!", time: "1h ago", read: true },
   { id: "3", title: "Recap", body: "You completed 3 of 5 habits yesterday.", time: "Yesterday", read: true },
 ];
 
-export function TopNav() {
+export function TopNav({
+  onMenuToggle,
+  mobileOpen = false,
+}: {
+  onMenuToggle?: () => void;
+  mobileOpen?: boolean;
+}) {
   const { theme, setTheme } = useTheme();
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -57,14 +64,16 @@ export function TopNav() {
       className="sticky top-0 z-40 flex items-center justify-between h-14 px-4 lg:px-6 border-b shrink-0"
       style={{ background: "var(--background)", borderColor: "var(--border)" }}
     >
-      <div className="flex items-center gap-4">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)] lg:hidden"
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <button
+          type="button"
+          onClick={onMenuToggle}
+          className="lg:hidden p-2 -ml-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 shrink-0"
+          aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          aria-expanded={mobileOpen}
         >
-          <Sparkles className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
-          Habit Flow
-        </Link>
+          {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+        </button>
         <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg border w-64 max-w-[240px]" style={{ borderColor: "var(--border)" }}>
           <Search className="w-4 h-4 text-[var(--muted)] shrink-0" />
           <input
@@ -76,7 +85,7 @@ export function TopNav() {
       </div>
 
       <div className="flex items-center gap-1 sm:gap-2">
-        {/* Theme toggle */}
+        {/* Theme toggle — compact on mobile */}
         <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: "var(--border)" }}>
           {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
             <button

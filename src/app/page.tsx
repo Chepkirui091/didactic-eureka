@@ -2,18 +2,18 @@
 
 import { useMemo, useState, useCallback, useEffect } from "react";
 import Link from "next/link";
-import { Flame, Target, ChevronRight, Check, Minus, Circle, TrendingUp, Award } from "lucide-react";
+import { Flame, Target, ChevronRight, TrendingUp, Award, Compass } from "lucide-react";
 import { ActivityHeatmap } from "@/components/activity-heatmap";
+import { EntryActionsMenu } from "@/components/entry-actions-menu";
 import {
   dummyHabits,
   getTodaysEntries,
   dummyToday,
   computeStreak,
-  dailyGoal,
   getEntriesForHabit,
 } from "@/lib/dummy-data";
 import { getQuoteForDate } from "@/lib/quotes";
-import type { Habit as HabitType, HabitEntry, EntryStatus } from "@/lib/types";
+import type { Habit as HabitType, HabitEntry, EntryStatus, RoadmapOverview } from "@/lib/types";
 
 // Local overrides for today's entries (so Done/Skip/Miss update UI immediately)
 function useTodaysEntriesWithOverrides() {
@@ -47,19 +47,6 @@ function useTodaysEntriesWithOverrides() {
   return { entries, setStatus };
 }
 
-function statusIcon(status: EntryStatus) {
-  switch (status) {
-    case "completed":
-      return <Check className="w-5 h-5 text-green-600 dark:text-green-400" />;
-    case "skipped":
-      return <Minus className="w-5 h-5 text-[var(--muted)]" />;
-    case "missed":
-      return <Circle className="w-5 h-5 text-[var(--muted)]" />;
-    default:
-      return <Circle className="w-5 h-5 text-[var(--muted)]" />;
-  }
-}
-
 function TodayHabitCard({
   habit,
   entry,
@@ -78,15 +65,15 @@ function TodayHabitCard({
 
   return (
     <div
-      className="rounded-xl border p-4 flex items-center justify-between gap-4"
+      className="rounded-xl border p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-4"
       style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="text-2xl shrink-0">{habit.icon ?? "✨"}</span>
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+        <span className="text-xl sm:text-2xl shrink-0">{habit.icon ?? "✨"}</span>
         <div className="min-w-0">
-          <p className="font-medium truncate">{habit.name}</p>
+          <p className="font-medium truncate text-sm sm:text-base">{habit.name}</p>
           {habit.habitType !== "binary" && (
-            <p className="text-sm text-[var(--muted)]">
+            <p className="text-xs sm:text-sm text-[var(--muted)] truncate">
               {habit.habitType === "quantitative" &&
                 `Target: ${habit.targetValue} ${habit.targetUnit}`}
               {habit.habitType === "timed" &&
@@ -95,46 +82,19 @@ function TodayHabitCard({
           )}
         </div>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         {streak.current > 0 && (
-          <span className="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
+          <span className="flex items-center gap-1 text-xs sm:text-sm text-amber-600 dark:text-amber-400">
             <Flame className="w-4 h-4" />
             {streak.current}
           </span>
         )}
-        {status === "pending" && (
-          <div className="flex gap-1">
-            <button
-              type="button"
-              onClick={() => onComplete(habit.id)}
-              className="px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-              style={{ background: "hsl(var(--accent))" }}
-            >
-              Done
-            </button>
-            <button
-              type="button"
-              onClick={() => onSkip(habit.id)}
-              className="px-3 py-1.5 rounded-lg text-sm border hover:bg-black/5 dark:hover:bg-white/5"
-              style={{ borderColor: "var(--border)" }}
-            >
-              Skip
-            </button>
-            <button
-              type="button"
-              onClick={() => onMiss(habit.id)}
-              className="px-3 py-1.5 rounded-lg text-sm text-[var(--muted)] hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              Miss
-            </button>
-          </div>
-        )}
-        {status !== "pending" && (
-          <span className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
-            {statusIcon(status)}
-            {status}
-          </span>
-        )}
+        <EntryActionsMenu
+          status={status}
+          onComplete={() => onComplete(habit.id)}
+          onSkip={() => onSkip(habit.id)}
+          onMiss={() => onMiss(habit.id)}
+        />
       </div>
     </div>
   );
@@ -192,6 +152,13 @@ export default function DashboardPage() {
     setQuote(getQuoteForDate(new Date().toISOString().slice(0, 10)));
   }, []);
 
+  const [roadmap, setRoadmap] = useState<RoadmapOverview | null>(null);
+  useEffect(() => {
+    fetch("/api/roadmap")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => setRoadmap(data));
+  }, []);
+
   const dashboardMetrics = useMemo(() => {
     const totalHabits = habitsForToday.length;
     let weekCompleted = 0;
@@ -234,7 +201,7 @@ export default function DashboardPage() {
         style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
       >
         <p className="text-sm text-[var(--muted)] mb-3">
-          Welcome back. Track today&apos;s habits below—and remember, skipping or missing a day is okay. What matters is showing up again.
+          Welcome back. Track today&apos;s habits below and remember, skipping or missing a day is okay. What matters is showing up again.
         </p>
         <blockquote className="text-lg font-medium italic border-l-4 pl-4" style={{ borderColor: "hsl(var(--accent))" }}>
           &ldquo;{quote}&rdquo;
@@ -290,6 +257,73 @@ export default function DashboardPage() {
           <p className="text-xs text-[var(--muted)] mt-0.5">Done so far</p>
         </div>
       </section>
+
+      {/* NestJS roadmap today */}
+      {roadmap && (
+        <section
+          className="rounded-xl border p-5"
+          style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold flex items-center gap-2">
+              <Compass className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
+              NestJS Roadmap - Day {roadmap.currentDay}
+            </h2>
+            <Link
+              href={`/roadmap/${roadmap.currentDay}`}
+              className="text-sm font-medium flex items-center gap-1 hover:underline"
+              style={{ color: "hsl(var(--accent))" }}
+            >
+              Open day <ChevronRight className="w-4 h-4" />
+            </Link>
+          </div>
+          {(() => {
+            const day = roadmap.days.find((d) => d.dayNumber === roadmap.currentDay);
+            const prog = roadmap.progress.find((p) => p.dayNumber === roadmap.currentDay);
+            if (!day || !prog) return null;
+            const blocksDone = roadmap.timeBlocks.filter(
+              (b) => prog.blocks[b.id] === "completed",
+            ).length;
+            return (
+              <>
+                <p className="text-sm font-medium">{day.title}</p>
+                <p className="text-sm text-[var(--muted)] mt-1 line-clamp-2">{day.task}</p>
+                <div className="flex items-center gap-3 mt-3">
+                  <div className="flex-1 h-2 rounded-full bg-[var(--border)] overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${(blocksDone / roadmap.timeBlocks.length) * 100}%`,
+                        background: "hsl(var(--accent))",
+                      }}
+                    />
+                  </div>
+                  <span className="text-xs text-[var(--muted)] shrink-0">
+                    {blocksDone}/{roadmap.timeBlocks.length} blocks
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 mt-2">
+                  {roadmap.streaks.study.current > 0 && (
+                    <span className="flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400">
+                      <Flame className="w-4 h-4" />
+                      {roadmap.streaks.study.current} day study streak
+                    </span>
+                  )}
+                  {roadmap.streaks.days.current > 0 && (
+                    <span className="text-xs text-[var(--muted)]">
+                      {roadmap.streaks.days.current} roadmap day
+                      {roadmap.streaks.days.current === 1 ? "" : "s"} in a row
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--muted)] mt-2">
+                  Learn 5:30–7:30 · Rebuild 9:30–10 · Build 7:30–9:30 · Test 9:30–10
+                </p>
+              </>
+            );
+          })()}
+        </section>
+      )}
 
       {/* GitHub-style daily activity heatmap */}
       <ActivityHeatmap />
@@ -355,6 +389,14 @@ export default function DashboardPage() {
           style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
         >
           <span className="font-medium">All habits</span>
+          <ChevronRight className="w-5 h-5 text-[var(--muted)] group-hover:text-[hsl(var(--accent))]" />
+        </Link>
+        <Link
+          href="/roadmap"
+          className="rounded-xl border p-4 flex items-center justify-between group hover:border-[hsl(var(--accent))] transition-colors"
+          style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
+        >
+          <span className="font-medium">NestJS 30-day roadmap</span>
           <ChevronRight className="w-5 h-5 text-[var(--muted)] group-hover:text-[hsl(var(--accent))]" />
         </Link>
         <Link
