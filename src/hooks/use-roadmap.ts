@@ -2,22 +2,18 @@
 
 import { useCallback } from "react";
 import type { EntryStatus, RoadmapDayProgress, RoadmapOverview, TimeBlockId } from "@/lib/types";
-import {
-  buildRoadmapOverview,
-  loadRoadmapState,
-  startRoadmapInStorage,
-  updateBlockInStorage,
-  updateDayNotesInStorage,
-} from "@/lib/roadmap-persistence";
 import { isDayUnlocked, getDayLockMessage } from "@/lib/nestjs-roadmap-data";
 import { celebrateCompletion, celebrateDayComplete } from "@/components/celebration";
 import { isFallbackResponse, readApiError } from "@/lib/api-response";
 import { toastError, toastSavedToDb } from "@/lib/toast-messages";
 import {
+  applyRoadmapBlockUpdate,
+  applyRoadmapDayNotes,
+  cacheRoadmapOverview,
   getRoadmap,
   refetchRoadmapAfterMutation,
 } from "@/lib/data-api";
-import { CacheKeys, writeCache } from "@/lib/client-cache";
+import { CacheKeys, readCache } from "@/lib/client-cache";
 import { useCachedData } from "@/hooks/use-cached-data";
 
 export function useRoadmap() {
@@ -27,26 +23,39 @@ export function useRoadmap() {
     fetcher,
   );
 
+  const revertToCachedRoadmap = useCallback(() => {
+    const cached = readCache<RoadmapOverview>(CacheKeys.roadmap);
+    if (cached?.source === "database") setData(cached.data);
+    else void refresh();
+  }, [setData, refresh]);
+
   const startRoadmap = useCallback(async () => {
     const res = await fetch("/api/roadmap", { method: "POST" });
     if (res.ok && !isFallbackResponse(res)) {
       const overview = (await res.json()) as RoadmapOverview;
-      writeCache(CacheKeys.roadmap, overview, "database");
+      cacheRoadmapOverview(overview);
       setData(overview);
       toastSavedToDb("Roadmap started");
       return;
     }
-    const local = startRoadmapInStorage();
-    setData(local);
-    writeCache(CacheKeys.roadmap, local, "local");
+    toastError(
+      res.ok
+        ? "Could not save to database — try again when the connection is stable"
+        : await readApiError(res),
+    );
   }, [setData]);
 
   const updateBlock = useCallback(
     async (dayNumber: number, blockId: TimeBlockId, status: EntryStatus) => {
-      const { dayJustCompleted } = updateBlockInStorage(dayNumber, blockId, status);
-      const localOverview = buildRoadmapOverview(loadRoadmapState());
-      setData(localOverview);
-      writeCache(CacheKeys.roadmap, localOverview, "local");
+      if (!roadmap) return;
+
+      const { overview: optimistic, dayJustCompleted } = applyRoadmapBlockUpdate(
+        roadmap,
+        dayNumber,
+        blockId,
+        status,
+      );
+      setData(optimistic);
 
       const res = await fetch(`/api/roadmap/days/${dayNumber}`, {
         method: "PATCH",
@@ -54,22 +63,29 @@ export function useRoadmap() {
         body: JSON.stringify({ blockId, status }),
       });
 
-      if (res.ok) {
-        if (!isFallbackResponse(res)) {
-          toastSavedToDb("Progress saved");
-          const overview = await refetchRoadmapAfterMutation();
-          setData(overview);
+      if (res.ok && !isFallbackResponse(res)) {
+        toastSavedToDb("Progress saved");
+        const overview = await refetchRoadmapAfterMutation();
+        setData(overview);
+
+        if (status === "completed") {
+          celebrateCompletion();
+          const savedDay = overview.progress.find((p) => p.dayNumber === dayNumber);
+          if (savedDay?.dayCompleted && dayJustCompleted) {
+            celebrateDayComplete();
+          }
         }
-      } else {
-        toastError(await readApiError(res));
+        return;
       }
 
-      if (status === "completed") {
-        celebrateCompletion();
-        if (dayJustCompleted) celebrateDayComplete();
-      }
+      revertToCachedRoadmap();
+      toastError(
+        res.ok
+          ? "Could not save to database — progress reverted"
+          : await readApiError(res),
+      );
     },
-    [setData],
+    [roadmap, setData, revertToCachedRoadmap],
   );
 
   const saveDayNotes = useCallback(
@@ -77,10 +93,9 @@ export function useRoadmap() {
       dayNumber: number,
       data: { notes: string; builtItems: string; learnNotes: string },
     ): Promise<RoadmapDayProgress | null> => {
-      updateDayNotesInStorage(dayNumber, data);
-      const localOverview = buildRoadmapOverview(loadRoadmapState());
-      setData(localOverview);
-      writeCache(CacheKeys.roadmap, localOverview, "local");
+      if (!roadmap) return null;
+
+      setData(applyRoadmapDayNotes(roadmap, dayNumber, data));
 
       const res = await fetch(`/api/roadmap/days/${dayNumber}`, {
         method: "PATCH",
@@ -88,20 +103,24 @@ export function useRoadmap() {
         body: JSON.stringify(data),
       });
 
-      if (res.ok) {
-        const progress = (await res.json()) as RoadmapDayProgress;
-        if (!isFallbackResponse(res)) {
-          toastSavedToDb("Notes saved to database");
-          const overview = await refetchRoadmapAfterMutation();
-          setData(overview);
-        }
-        return progress;
+      if (res.ok && !isFallbackResponse(res)) {
+        toastSavedToDb("Notes saved to database");
+        const overview = await refetchRoadmapAfterMutation();
+        setData(overview);
+        return overview.progress.find((p) => p.dayNumber === dayNumber) ?? null;
       }
 
-      toastError(await readApiError(res));
-      return localOverview.progress.find((p) => p.dayNumber === dayNumber) ?? null;
+      revertToCachedRoadmap();
+      toastError(
+        res.ok
+          ? "Could not save notes to database — reverted"
+          : await readApiError(res),
+      );
+      return readCache<RoadmapOverview>(CacheKeys.roadmap)?.data.progress.find(
+        (p) => p.dayNumber === dayNumber,
+      ) ?? null;
     },
-    [setData],
+    [roadmap, setData, revertToCachedRoadmap],
   );
 
   const checkDayAccess = useCallback(

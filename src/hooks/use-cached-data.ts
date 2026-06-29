@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { CacheKeys, readCache, subscribeCacheInvalidation } from "@/lib/client-cache";
 
 /**
- * Load data once from cache (localStorage + memory), fetch only on cache miss or force refresh.
- * Cache is read only after mount to avoid SSR/client hydration mismatches.
+ * DB-first data hook: read from localStorage cache after the first successful fetch;
+ * refetch only on cache miss, force refresh, or cache invalidation after mutations.
  */
 export function useCachedData<T>(
   cacheKey: string,
@@ -19,7 +19,7 @@ export function useCachedData<T>(
     async (force = false) => {
       if (!force) {
         const cached = readCache<T>(cacheKey);
-        if (cached) {
+        if (cached?.source === "database") {
           setData(cached.data);
           setLoading(false);
           return cached.data;
