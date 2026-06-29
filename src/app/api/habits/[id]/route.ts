@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isDatabaseConfigured } from "@/lib/prisma";
+import { jsonWithSource, resolveDataSource, withDatabase } from "@/lib/api-db";
 import {
   getHabitById,
   updateHabitById,
@@ -13,21 +13,22 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const source = await resolveDataSource();
 
-  if (!isDatabaseConfigured()) {
+  if (source === "fallback") {
     const habit = habitsStore.find((h) => h.id === id);
     if (!habit) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(habit);
+    return jsonWithSource(habit, "fallback");
   }
 
-  try {
-    const habit = await getHabitById(id);
+  const result = await withDatabase(() => getHabitById(id));
+  if (!result.ok) {
+    const habit = habitsStore.find((h) => h.id === id);
     if (!habit) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(habit);
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Database error" }, { status: 500 });
+    return jsonWithSource(habit, "fallback");
   }
+  if (!result.value) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return jsonWithSource(result.value, "database");
 }
 
 export async function PUT(
@@ -36,8 +37,9 @@ export async function PUT(
 ) {
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
+  const source = await resolveDataSource();
 
-  if (!isDatabaseConfigured()) {
+  if (source === "fallback") {
     const patch: Parameters<typeof updateHabit>[1] = {};
     if (body.name !== undefined) patch.name = body.name;
     if (body.description !== undefined) patch.description = body.description;
@@ -55,11 +57,11 @@ export async function PUT(
     if (body.schedule !== undefined) patch.schedule = body.schedule as ScheduleConfig;
     const updated = updateHabit(id, patch);
     if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(updated);
+    return jsonWithSource(updated, "fallback");
   }
 
-  try {
-    const updated = await updateHabitById(id, {
+  const result = await withDatabase(() =>
+    updateHabitById(id, {
       name: body.name,
       description: body.description,
       motivation: body.motivation,
@@ -73,13 +75,14 @@ export async function PUT(
       startDate: body.startDate,
       endDate: body.endDate,
       schedule: body.schedule,
-    });
-    if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json(updated);
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Database error" }, { status: 500 });
+    }),
+  );
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.message }, { status: 503 });
   }
+  if (!result.value) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return jsonWithSource(result.value, "database");
 }
 
 export async function DELETE(
@@ -87,20 +90,19 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const source = await resolveDataSource();
 
-  if (!isDatabaseConfigured()) {
+  if (source === "fallback") {
     const idx = habitsStore.findIndex((h) => h.id === id);
     if (idx === -1) return NextResponse.json({ error: "Not found" }, { status: 404 });
     habitsStore.splice(idx, 1);
     return new NextResponse(null, { status: 204 });
   }
 
-  try {
-    const ok = await deleteHabitById(id);
-    if (!ok) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return new NextResponse(null, { status: 204 });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Database error" }, { status: 500 });
+  const result = await withDatabase(() => deleteHabitById(id));
+  if (!result.ok) {
+    return NextResponse.json({ error: result.message }, { status: 503 });
   }
+  if (!result.value) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return new NextResponse(null, { status: 204 });
 }

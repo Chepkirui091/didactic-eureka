@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Flame, Calendar, Target, Pencil, Trash2 } from "lucide-react";
 import { computeStreakFromEntries, todayString } from "@/lib/streak";
-import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { HabitFormModal } from "@/components/habit-form-modal";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { Habit as HabitType, HabitEntry } from "@/lib/types";
+import { getHabitById, getEntriesForHabit, refetchHabitsAfterMutation } from "@/lib/data-api";
+import { CacheKeys } from "@/lib/client-cache";
+import { useCachedData } from "@/hooks/use-cached-data";
 
 const CATEGORY_LABELS: Record<string, string> = {
   health: "Health",
@@ -62,8 +64,6 @@ export default function HabitDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const [resolvedParams, setResolvedParams] = useState<{ id: string } | null>(null);
-  const [habit, setHabit] = useState<HabitType | null>(null);
-  const [entries, setEntries] = useState<HabitEntry[]>([]);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const router = useRouter();
@@ -73,24 +73,34 @@ export default function HabitDetailPage({
 
   const id = resolvedParams?.id;
 
-  const fetchHabit = useCallback(async () => {
-    if (!id) return;
-    const [habitRes, entriesRes] = await Promise.all([
-      fetch(`/api/habits/${id}`),
-      fetch(`/api/entries?habitId=${id}`),
-    ]);
-    if (habitRes.ok) {
-      setHabit(await habitRes.json());
-    } else {
-      setHabit(null);
-    }
-    if (entriesRes.ok) {
-      const data = await entriesRes.json();
-      setEntries(Array.isArray(data) ? data : []);
-    }
-  }, [id]);
+  const habitFetcher = useCallback(
+    (force: boolean) => (id ? getHabitById(id, force) : Promise.resolve(null)),
+    [id],
+  );
+  const entriesFetcher = useCallback(
+    (force: boolean) => (id ? getEntriesForHabit(id, force) : Promise.resolve([])),
+    [id],
+  );
 
-  useLiveRefresh(fetchHabit, [fetchHabit]);
+  const { data: habit } = useCachedData<HabitType | null>(
+    id ? CacheKeys.habit(id) : "habit:pending",
+    habitFetcher,
+    [id],
+  );
+  const { data: entriesRaw = [], refresh: refreshEntries } = useCachedData<HabitEntry[]>(
+    id ? CacheKeys.entriesHabit(id) : "entries:habit:pending",
+    entriesFetcher,
+    [id],
+  );
+  const entries = entriesRaw ?? [];
+
+  const handleEditSuccess = useCallback(async () => {
+    if (!id) return;
+    await refetchHabitsAfterMutation();
+    await getHabitById(id, true);
+    await getEntriesForHabit(id, true);
+    refreshEntries();
+  }, [id, refreshEntries]);
 
   const streak = habit ? computeStreakFromEntries(entries) : { current: 0, longest: 0 };
   const completed = entries.filter((e) => e.status === "completed").length;
@@ -248,7 +258,7 @@ export default function HabitDetailPage({
         open={editModalOpen}
         onClose={() => setEditModalOpen(false)}
         initialHabit={habit}
-        onSuccess={() => { setEditModalOpen(false); fetchHabit(); }}
+        onSuccess={() => { setEditModalOpen(false); void handleEditSuccess(); }}
       />
 
       <ConfirmDialog

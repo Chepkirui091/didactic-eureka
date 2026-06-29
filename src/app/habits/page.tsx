@@ -1,13 +1,18 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, Flame, ChevronRight, GripVertical, Pencil, Trash2 } from "lucide-react";
-import { computeStreakFromEntries, todayString } from "@/lib/streak";
-import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { computeStreakFromEntries } from "@/lib/streak";
 import { HabitFormModal } from "@/components/habit-form-modal";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { Habit as HabitType, HabitEntry } from "@/lib/types";
+import { isFallbackResponse, readApiError } from "@/lib/api-response";
+import { toastError, toastSuccess } from "@/lib/toast-messages";
+import { getEntriesDaysBack, refetchHabitsAfterMutation } from "@/lib/data-api";
+import { CacheKeys } from "@/lib/client-cache";
+import { useCachedData } from "@/hooks/use-cached-data";
+import { useHabits } from "@/hooks/use-habits";
 
 const CATEGORY_LABELS: Record<string, string> = {
   health: "Health",
@@ -93,28 +98,24 @@ function HabitRow({
 }
 
 export default function HabitsPage() {
-  const [habits, setHabits] = useState<HabitType[]>([]);
-  const [allEntries, setAllEntries] = useState<HabitEntry[]>([]);
+  const { habits, refresh: refreshHabits } = useHabits();
+  const entriesFetcher = useCallback((force: boolean) => getEntriesDaysBack(60, force), []);
+  const { data: allEntriesRaw = [], refresh: refreshEntries } = useCachedData<HabitEntry[]>(
+    CacheKeys.entriesDays(60),
+    entriesFetcher,
+  );
+  const allEntries = allEntriesRaw ?? [];
+
   const [modalOpen, setModalOpen] = useState(false);
   const [editingHabit, setEditingHabit] = useState<HabitType | null>(null);
   const [habitToDelete, setHabitToDelete] = useState<HabitType | null>(null);
 
-  const fetchHabits = useCallback(async () => {
-    const [habitsRes, entriesRes] = await Promise.all([
-      fetch("/api/habits"),
-      fetch("/api/entries?daysBack=60"),
-    ]);
-    if (habitsRes.ok) {
-      const data = await habitsRes.json();
-      setHabits(Array.isArray(data) ? data : []);
-    }
-    if (entriesRes.ok) {
-      const data = await entriesRes.json();
-      setAllEntries(Array.isArray(data) ? data : []);
-    }
-  }, []);
-
-  useLiveRefresh(fetchHabits, [fetchHabits]);
+  const handleMutationSuccess = useCallback(async () => {
+    await refetchHabitsAfterMutation();
+    await getEntriesDaysBack(60, true);
+    refreshHabits();
+    refreshEntries();
+  }, [refreshHabits, refreshEntries]);
 
   const openAdd = () => {
     setEditingHabit(null);
@@ -138,9 +139,23 @@ export default function HabitsPage() {
   const handleDeleteConfirm = async () => {
     if (!habitToDelete) return;
     const res = await fetch(`/api/habits/${habitToDelete.id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error("Failed to delete");
-    fetchHabits();
+    if (!res.ok) {
+      toastError(await readApiError(res));
+      throw new Error("Failed to delete");
+    }
+    toastSuccess(isFallbackResponse(res) ? "Habit deleted (offline)" : "Habit deleted");
+    await handleMutationSuccess();
   };
+
+  const entriesByHabit = useMemo(() => {
+    const map = new Map<string, HabitEntry[]>();
+    for (const e of allEntries) {
+      const list = map.get(e.habitId) ?? [];
+      list.push(e);
+      map.set(e.habitId, list);
+    }
+    return map;
+  }, [allEntries]);
 
   return (
     <div className="space-y-8">
@@ -164,26 +179,15 @@ export default function HabitsPage() {
 
       <div className="space-y-3">
         {habits.length === 0 ? (
-          <div
-            className="rounded-xl border border-dashed p-12 text-center"
-            style={{ borderColor: "var(--border)" }}
-          >
-            <p className="text-[var(--muted)] mb-4">No habits yet.</p>
-            <button
-              type="button"
-              onClick={openAdd}
-              className="px-4 py-2 rounded-lg font-medium text-white"
-              style={{ background: "hsl(var(--accent))" }}
-            >
-              Add your first habit
-            </button>
-          </div>
+          <p className="text-[var(--muted)] py-8 text-center">
+            No habits yet. Add your first one above.
+          </p>
         ) : (
           habits.map((habit) => (
             <HabitRow
               key={habit.id}
               habit={habit}
-              entries={allEntries.filter((e) => e.habitId === habit.id)}
+              entries={entriesByHabit.get(habit.id) ?? []}
               onEdit={openEdit}
               onDelete={handleDeleteClick}
             />
@@ -195,23 +199,16 @@ export default function HabitsPage() {
         open={modalOpen}
         onClose={closeModal}
         initialHabit={editingHabit}
-        onSuccess={fetchHabits}
+        onSuccess={handleMutationSuccess}
       />
 
       <ConfirmDialog
         open={!!habitToDelete}
         onClose={() => setHabitToDelete(null)}
         title="Delete habit?"
-        message={
-          habitToDelete
-            ? `Are you sure you want to delete "${habitToDelete.name}"? This cannot be undone.`
-            : ""
-        }
-        confirmLabel="Yes, delete"
-        cancelLabel="Cancel"
+        message={`Are you sure you want to delete "${habitToDelete?.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
         variant="danger"
-        successTitle="Deleted"
-        successMessage="The habit has been removed."
         onConfirm={handleDeleteConfirm}
       />
     </div>

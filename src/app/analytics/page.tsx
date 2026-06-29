@@ -1,31 +1,22 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { BarChart3, Calendar, Lightbulb } from "lucide-react";
 import { computeStreakFromEntries } from "@/lib/streak";
-import { useLiveRefresh } from "@/hooks/use-live-refresh";
-import type { Habit, HabitEntry } from "@/lib/types";
+import type { HabitEntry } from "@/lib/types";
+import { getEntriesDaysBack } from "@/lib/data-api";
+import { CacheKeys } from "@/lib/client-cache";
+import { useCachedData } from "@/hooks/use-cached-data";
+import { useHabits } from "@/hooks/use-habits";
 
 export default function AnalyticsPage() {
-  const [habits, setHabits] = useState<Habit[]>([]);
-  const [allEntries, setAllEntries] = useState<HabitEntry[]>([]);
-
-  const refresh = useCallback(async () => {
-    const [habitsRes, entriesRes] = await Promise.all([
-      fetch("/api/habits"),
-      fetch("/api/entries?daysBack=90"),
-    ]);
-    if (habitsRes.ok) {
-      const data = await habitsRes.json();
-      setHabits(Array.isArray(data) ? data : []);
-    }
-    if (entriesRes.ok) {
-      const data = await entriesRes.json();
-      setAllEntries(Array.isArray(data) ? data : []);
-    }
-  }, []);
-
-  useLiveRefresh(refresh, [refresh]);
+  const { habits } = useHabits();
+  const entriesFetcher = useCallback((force: boolean) => getEntriesDaysBack(90, force), []);
+  const { data: allEntriesRaw = [] } = useCachedData<HabitEntry[]>(
+    CacheKeys.entriesDays(90),
+    entriesFetcher,
+  );
+  const allEntries = allEntriesRaw ?? [];
 
   const habitsWithStats = useMemo(() => {
     return habits.map((h) => {

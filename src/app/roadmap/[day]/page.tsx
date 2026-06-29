@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -14,114 +14,58 @@ import {
   Lock,
   Flame,
 } from "lucide-react";
-import type { RoadmapDay, RoadmapDayProgress, EntryStatus, TimeBlockId, RoadmapStreaks } from "@/lib/types";
-import { TIME_BLOCKS, WEEK_GOALS } from "@/lib/nestjs-roadmap-data";
+import type { EntryStatus, TimeBlockId } from "@/lib/types";
+import { TIME_BLOCKS, WEEK_GOALS, getDayByNumber } from "@/lib/nestjs-roadmap-data";
 import { TimeBlockCard } from "@/components/time-block-card";
-
-interface DayResponse {
-  day: RoadmapDay;
-  progress: RoadmapDayProgress;
-  currentDay?: number;
-  streaks: RoadmapStreaks;
-}
-
-interface LockedResponse {
-  error: string;
-  locked: true;
-  requiredDay: number;
-}
+import { useRoadmap } from "@/hooks/use-roadmap";
 
 export default function RoadmapDayPage() {
   const params = useParams();
   const dayNumber = Number.parseInt(String(params.day), 10);
-  const [data, setData] = useState<DayResponse | null>(null);
-  const [streaks, setStreaks] = useState<RoadmapStreaks | null>(null);
-  const [locked, setLocked] = useState<LockedResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { roadmap, loading, updateBlock, saveDayNotes, checkDayAccess } = useRoadmap();
+
+  const day = getDayByNumber(dayNumber);
+  const progress = roadmap?.progress.find((p) => p.dayNumber === dayNumber);
+  const access = checkDayAccess(dayNumber);
+
   const [notes, setNotes] = useState("");
   const [builtItems, setBuiltItems] = useState("");
   const [learnNotes, setLearnNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const load = useCallback(() => {
-    if (Number.isNaN(dayNumber) || dayNumber < 1 || dayNumber > 30) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setLocked(null);
-    fetch(`/api/roadmap/days/${dayNumber}`)
-      .then(async (r) => {
-        if (r.status === 403) {
-          const body = (await r.json()) as LockedResponse;
-          setLocked(body);
-          setData(null);
-          return;
-        }
-        if (!r.ok) {
-          setData(null);
-          return;
-        }
-        const res = (await r.json()) as DayResponse;
-        setData(res);
-        setStreaks(res.streaks);
-        setNotes(res.progress.notes);
-        setBuiltItems(res.progress.builtItems);
-        setLearnNotes(res.progress.learnNotes);
-      })
-      .finally(() => setLoading(false));
-  }, [dayNumber]);
-
   useEffect(() => {
-    load();
-  }, [load]);
+    if (progress) {
+      setNotes(progress.notes);
+      setBuiltItems(progress.builtItems);
+      setLearnNotes(progress.learnNotes);
+    }
+  }, [progress?.notes, progress?.builtItems, progress?.learnNotes, progress?.updatedAt]);
 
-  const refreshStreaks = useCallback(() => {
-    fetch("/api/roadmap")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((overview: { streaks?: RoadmapStreaks } | null) => {
-        if (overview?.streaks) setStreaks(overview.streaks);
-      });
-  }, []);
-
-  const updateBlock = (blockId: TimeBlockId, status: EntryStatus) => {
-    fetch(`/api/roadmap/days/${dayNumber}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blockId, status }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((progress: RoadmapDayProgress | null) => {
-        if (progress && data) setData({ ...data, progress });
-        refreshStreaks();
-      });
-  };
-
-  const saveNotes = () => {
+  const handleSaveNotes = () => {
     setSaving(true);
     setSaved(false);
-    fetch(`/api/roadmap/days/${dayNumber}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ notes, builtItems, learnNotes }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((progress: RoadmapDayProgress | null) => {
-        if (progress && data) {
-          setData({ ...data, progress });
-          setSaved(true);
-          setTimeout(() => setSaved(false), 2000);
-        }
+    saveDayNotes(dayNumber, { notes, builtItems, learnNotes })
+      .then(() => {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
       })
       .finally(() => setSaving(false));
   };
+
+  const handleBlockUpdate = (blockId: TimeBlockId, status: EntryStatus) => {
+    updateBlock(dayNumber, blockId, status);
+  };
+
+  if (Number.isNaN(dayNumber) || dayNumber < 1 || dayNumber > 30) {
+    return <p className="text-[var(--muted)]">Invalid day.</p>;
+  }
 
   if (loading) {
     return <p className="text-[var(--muted)]">Loading day {dayNumber}…</p>;
   }
 
-  if (locked) {
+  if (!access.allowed) {
     return (
       <div className="space-y-6 max-w-lg">
         <Link
@@ -142,27 +86,29 @@ export default function RoadmapDayPage() {
             <Lock className="w-7 h-7" style={{ color: "hsl(var(--accent))" }} />
           </div>
           <h1 className="text-xl font-bold">Day {dayNumber} is locked</h1>
-          <p className="text-[var(--muted)] mt-2 text-sm">{locked.error}</p>
-          <Link
-            href={`/roadmap/${locked.requiredDay}`}
-            className="inline-block mt-6 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90"
-            style={{ background: "hsl(var(--accent))" }}
-          >
-            Go to Day {locked.requiredDay}
-          </Link>
+          <p className="text-[var(--muted)] mt-2 text-sm">{access.message}</p>
+          {access.requiredDay && (
+            <Link
+              href={`/roadmap/${access.requiredDay}`}
+              className="inline-block mt-6 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90"
+              style={{ background: "hsl(var(--accent))" }}
+            >
+              Go to Day {access.requiredDay}
+            </Link>
+          )}
         </div>
       </div>
     );
   }
 
-  if (!data) {
+  if (!day || !progress) {
     return <p className="text-[var(--muted)]">Day not found.</p>;
   }
 
-  const { day, progress } = data;
   const blocksDone = TIME_BLOCKS.filter((b) => progress.blocks[b.id] === "completed").length;
   const prevDay = dayNumber > 1 ? dayNumber - 1 : null;
   const nextDay = dayNumber < 30 ? dayNumber + 1 : null;
+  const streaks = roadmap?.streaks;
 
   return (
     <div className="space-y-8">
@@ -230,7 +176,6 @@ export default function RoadmapDayPage() {
         </div>
       </header>
 
-      {/* Learn topics */}
       <section
         className="rounded-xl border p-5"
         style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
@@ -249,7 +194,6 @@ export default function RoadmapDayPage() {
         </ul>
       </section>
 
-      {/* Today's task */}
       <section
         className="rounded-xl border p-5"
         style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
@@ -261,24 +205,22 @@ export default function RoadmapDayPage() {
         <p className="text-sm">{day.task}</p>
       </section>
 
-      {/* Time blocks */}
       <section>
-        <h2 className="font-semibold text-lg mb-4">Daily blocks - mark what you&apos;ve done</h2>
+        <h2 className="font-semibold text-lg mb-4">Daily blocks — mark what you&apos;ve done</h2>
         <div className="space-y-3">
           {TIME_BLOCKS.map((block) => (
             <TimeBlockCard
               key={block.id}
               block={block}
               status={progress.blocks[block.id]}
-              onComplete={() => updateBlock(block.id, "completed")}
-              onSkip={() => updateBlock(block.id, "skipped")}
-              onMiss={() => updateBlock(block.id, "missed")}
+              onComplete={() => handleBlockUpdate(block.id, "completed")}
+              onSkip={() => handleBlockUpdate(block.id, "skipped")}
+              onMiss={() => handleBlockUpdate(block.id, "missed")}
             />
           ))}
         </div>
       </section>
 
-      {/* Notes */}
       <section
         className="rounded-xl border p-5 space-y-5"
         style={{ background: "var(--card)", borderColor: "var(--card-border)" }}
@@ -336,7 +278,7 @@ export default function RoadmapDayPage() {
 
         <button
           type="button"
-          onClick={saveNotes}
+          onClick={handleSaveNotes}
           disabled={saving}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
           style={{ background: "hsl(var(--accent))" }}
@@ -346,7 +288,6 @@ export default function RoadmapDayPage() {
         </button>
       </section>
 
-      {/* Navigation */}
       <nav className="flex justify-between pt-2 border-t" style={{ borderColor: "var(--border)" }}>
         {prevDay ? (
           <Link

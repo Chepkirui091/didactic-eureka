@@ -1,21 +1,22 @@
 import { NextResponse } from "next/server";
-import { isDatabaseConfigured } from "@/lib/prisma";
+import { jsonWithSource, resolveDataSource, withDatabase } from "@/lib/api-db";
 import { listHabits, createHabit } from "@/lib/habits-db";
 import { habitsStore } from "@/lib/api-store";
 import type { Habit, ScheduleConfig } from "@/lib/types";
 
 export async function GET() {
-  if (!isDatabaseConfigured()) {
+  const source = await resolveDataSource();
+  if (source === "fallback") {
     const list = habitsStore.slice().sort((a, b) => a.sortOrder - b.sortOrder);
-    return NextResponse.json(list);
+    return jsonWithSource(list, "fallback");
   }
-  try {
-    const list = await listHabits();
-    return NextResponse.json(list);
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Database error" }, { status: 500 });
+
+  const result = await withDatabase(() => listHabits());
+  if (!result.ok) {
+    const list = habitsStore.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+    return jsonWithSource(list, "fallback");
   }
+  return jsonWithSource(result.value, "database");
 }
 
 export async function POST(req: Request) {
@@ -39,7 +40,8 @@ export async function POST(req: Request) {
     schedule: (body.schedule as ScheduleConfig) ?? { frequency: "daily" },
   };
 
-  if (!isDatabaseConfigured()) {
+  const source = await resolveDataSource();
+  if (source === "fallback") {
     const newHabit: Habit = {
       id: `api-${Date.now()}`,
       userId: "user-demo",
@@ -48,18 +50,16 @@ export async function POST(req: Request) {
       updatedAt: new Date().toISOString(),
     };
     habitsStore.push(newHabit);
-    return NextResponse.json(newHabit, { status: 201 });
+    return jsonWithSource(newHabit, "fallback", { status: 201 });
   }
 
-  try {
+  const result = await withDatabase(async () => {
     const habits = await listHabits();
-    const created = await createHabit({
-      ...habitData,
-      sortOrder: habits.length,
-    });
-    return NextResponse.json(created, { status: 201 });
-  } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Database error" }, { status: 500 });
+    return createHabit({ ...habitData, sortOrder: habits.length });
+  });
+
+  if (!result.ok) {
+    return NextResponse.json({ error: result.message }, { status: 503 });
   }
+  return jsonWithSource(result.value, "database", { status: 201 });
 }
