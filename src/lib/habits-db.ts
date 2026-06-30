@@ -110,6 +110,22 @@ export async function ensureDemoUser() {
 }
 
 export async function ensureSeeded() {
+  if (seeded) return;
+  if (!seedPromise) {
+    seedPromise = runSeed().then(() => {
+      seeded = true;
+    }).catch((err) => {
+      seedPromise = null;
+      throw err;
+    });
+  }
+  await seedPromise;
+}
+
+let seeded = false;
+let seedPromise: Promise<void> | null = null;
+
+async function runSeed() {
   await ensureDemoUser();
   const count = await getPrisma().habit.count({ where: { userId: DEMO_USER_ID } });
   if (count > 0) return;

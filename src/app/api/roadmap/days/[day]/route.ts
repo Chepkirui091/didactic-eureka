@@ -65,18 +65,13 @@ export async function GET(
     );
   }
 
-  const accessResult = await withDatabase(() => checkDayAccessDb(dayNumber));
-  if (!accessResult.ok) {
-    return NextResponse.json({ error: accessResult.message }, { status: 503 });
-  }
-  if (!accessResult.value.allowed) {
-    return lockedResponse(dayNumber, accessResult.value);
-  }
-
-  const result = await withDatabase(async () => {
+  const accessResult = await withDatabase(async () => {
+    const access = await checkDayAccessDb(dayNumber);
+    if (!access.allowed) return { locked: true as const, access };
     const progress = await getDayProgressDb(dayNumber);
     const overview = await getRoadmapOverviewDb();
     return {
+      locked: false as const,
       day: curriculum,
       progress,
       unlocked: true,
@@ -85,10 +80,13 @@ export async function GET(
     };
   });
 
-  if (!result.ok) {
-    return NextResponse.json({ error: result.message }, { status: 503 });
+  if (!accessResult.ok) {
+    return NextResponse.json({ error: accessResult.message }, { status: 503 });
   }
-  return jsonWithSource(result.value, "database");
+  if (accessResult.value.locked) {
+    return lockedResponse(dayNumber, accessResult.value.access);
+  }
+  return jsonWithSource(accessResult.value, "database");
 }
 
 export async function PATCH(
@@ -126,37 +124,44 @@ export async function PATCH(
     return jsonWithSource(updated, "fallback");
   }
 
-  const accessResult = await withDatabase(() => checkDayAccessDb(dayNumber));
-  if (!accessResult.ok) {
-    return NextResponse.json({ error: accessResult.message }, { status: 503 });
-  }
-  if (!accessResult.value.allowed) {
-    return lockedResponse(dayNumber, accessResult.value);
-  }
+  const accessResult = await withDatabase(async () => {
+    const access = await checkDayAccessDb(dayNumber);
+    if (!access.allowed) return { locked: true as const, access };
 
-  if (body.blockId && body.status) {
-    if (!VALID_BLOCKS.includes(body.blockId)) {
-      return NextResponse.json({ error: "Invalid block" }, { status: 400 });
+    if (body.blockId && body.status) {
+      if (!VALID_BLOCKS.includes(body.blockId)) {
+        return { error: "Invalid block" as const };
+      }
+      if (!VALID_STATUSES.includes(body.status)) {
+        return { error: "Invalid status" as const };
+      }
+      const updated = await updateBlockStatusDb(dayNumber, body.blockId, body.status);
+      return { locked: false as const, updated };
     }
-    if (!VALID_STATUSES.includes(body.status)) {
-      return NextResponse.json({ error: "Invalid status" }, { status: 400 });
-    }
-    const result = await withDatabase(() =>
-      updateBlockStatusDb(dayNumber, body.blockId, body.status),
-    );
-    if (!result.ok) return NextResponse.json({ error: result.message }, { status: 503 });
-    if (!result.value) return NextResponse.json({ error: "Day not found" }, { status: 404 });
-    return jsonWithSource(result.value, "database");
-  }
 
-  const result = await withDatabase(() =>
-    updateDayNotesDb(dayNumber, {
+    const updated = await updateDayNotesDb(dayNumber, {
       notes: body.notes,
       builtItems: body.builtItems,
       learnNotes: body.learnNotes,
-    }),
-  );
-  if (!result.ok) return NextResponse.json({ error: result.message }, { status: 503 });
-  if (!result.value) return NextResponse.json({ error: "Day not found" }, { status: 404 });
-  return jsonWithSource(result.value, "database");
+    });
+    return { locked: false as const, updated };
+  });
+
+  if (!accessResult.ok) {
+    return NextResponse.json({ error: accessResult.message }, { status: 503 });
+  }
+  const value = accessResult.value;
+  if ("error" in value && value.error === "Invalid block") {
+    return NextResponse.json({ error: "Invalid block" }, { status: 400 });
+  }
+  if ("error" in value && value.error === "Invalid status") {
+    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+  }
+  if (value.locked) {
+    return lockedResponse(dayNumber, value.access);
+  }
+  if (!value.updated) {
+    return NextResponse.json({ error: "Day not found" }, { status: 404 });
+  }
+  return jsonWithSource(value.updated, "database");
 }

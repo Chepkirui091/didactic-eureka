@@ -1,5 +1,9 @@
+import dns from "node:dns";
 import { PrismaClient } from "@prisma/client";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+
+// Avoid long hangs when Railway host resolves to IPv6 first (Node falls back slowly).
+dns.setDefaultResultOrder("ipv4first");
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -32,7 +36,7 @@ function buildPoolConfig(url: string) {
     parsed.hostname.endsWith(".railway.app");
   const needsSsl = remote || explicitSsl || isRailway;
 
-  const timeout = remote ? 30_000 : 10_000;
+  const timeout = remote ? 10_000 : 5_000;
 
   return {
     host: parsed.hostname,
@@ -44,7 +48,7 @@ function buildPoolConfig(url: string) {
     connectTimeout: timeout,
     acquireTimeout: timeout,
     idleTimeout: 120,
-    minimumIdle: 0,
+    minimumIdle: 1,
     ...(needsSsl
       ? {
           ssl: {

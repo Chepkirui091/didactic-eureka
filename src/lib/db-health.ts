@@ -11,8 +11,9 @@ const globalHealth = globalThis as unknown as { dbHealth?: HealthCache };
 
 const OK_TTL_MS = 60_000;
 const FAIL_TTL_MS = 15_000;
-const PING_TIMEOUT_MS = 30_000;
-const MAX_ATTEMPTS = 2;
+/** Fail fast — 30s × 2 retries was causing 60s waits before fallback. */
+const PING_TIMEOUT_MS = 5_000;
+const MAX_ATTEMPTS = 1;
 
 function getCache(): HealthCache | undefined {
   return globalHealth.dbHealth;

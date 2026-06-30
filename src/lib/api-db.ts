@@ -4,8 +4,20 @@ import { DATA_SOURCE_HEADER } from "./api-response";
 
 export { DATA_SOURCE_HEADER } from "./api-response";
 
+/** Coalesce concurrent health checks within the same serverless instance. */
+let inflightHealth: Promise<boolean> | null = null;
+
+function checkDatabaseOnce(): Promise<boolean> {
+  if (!inflightHealth) {
+    inflightHealth = canUseDatabase().finally(() => {
+      inflightHealth = null;
+    });
+  }
+  return inflightHealth;
+}
+
 export async function resolveDataSource(): Promise<"database" | "fallback"> {
-  return (await canUseDatabase()) ? "database" : "fallback";
+  return (await checkDatabaseOnce()) ? "database" : "fallback";
 }
 
 export function jsonWithSource<T>(
@@ -21,7 +33,7 @@ export function jsonWithSource<T>(
 export async function withDatabase<T>(
   fn: () => Promise<T>,
 ): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
-  if (!(await canUseDatabase())) {
+  if (!(await checkDatabaseOnce())) {
     return {
       ok: false,
       message: databaseConnectionHint(),
