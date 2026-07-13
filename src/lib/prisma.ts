@@ -1,12 +1,14 @@
 import dns from "node:dns";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { Pool } from "pg";
 
-// Avoid long hangs when Railway host resolves to IPv6 first (Node falls back slowly).
+// Avoid long hangs when remote host resolves to IPv6 first (Node falls back slowly).
 dns.setDefaultResultOrder("ipv4first");
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  pgPool: Pool | undefined;
 };
 
 function isLocalHost(hostname: string): boolean {
@@ -17,49 +19,27 @@ function isLocalHost(hostname: string): boolean {
   );
 }
 
-/** Railway / remote MySQL needs SSL and longer timeouts than local dev. */
-function buildPoolConfig(url: string) {
+/** Remote Postgres (e.g. Render) needs SSL and longer timeouts than local dev. */
+function buildPool(url: string): Pool {
   const parsed = new URL(url);
   const remote = !isLocalHost(parsed.hostname);
 
-  const sslParam = parsed.searchParams.get("ssl");
   const sslMode = parsed.searchParams.get("sslmode");
   const explicitSsl =
-    sslParam === "true" ||
-    sslParam === "1" ||
     sslMode === "require" ||
-    sslMode === "verify-full";
-
-  // Railway proxy hosts always need TLS even if the URL omits sslmode
-  const isRailway =
-    parsed.hostname.endsWith(".rlwy.net") ||
-    parsed.hostname.endsWith(".railway.app");
-  const needsSsl = remote || explicitSsl || isRailway;
-
+    sslMode === "verify-full" ||
+    sslMode === "verify-ca";
+  const isRender = parsed.hostname.endsWith(".render.com");
+  const needsSsl = remote || explicitSsl || isRender;
   const timeout = remote ? 10_000 : 5_000;
 
-  return {
-    host: parsed.hostname,
-    port: Number(parsed.port) || 3306,
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    database: parsed.pathname.replace(/^\//, "").split("?")[0],
-    connectionLimit: 5,
-    connectTimeout: timeout,
-    acquireTimeout: timeout,
-    idleTimeout: 120,
-    minimumIdle: 1,
-    ...(needsSsl
-      ? {
-          ssl: {
-            // Railway proxy certs often need this; strict verify for other hosts
-            rejectUnauthorized: isRailway
-              ? false
-              : parsed.searchParams.get("sslaccept") !== "accept_invalid_certs",
-          },
-        }
-      : {}),
-  };
+  return new Pool({
+    connectionString: url,
+    max: 5,
+    connectionTimeoutMillis: timeout,
+    idleTimeoutMillis: 120_000,
+    ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+  });
 }
 
 function createPrismaClient(): PrismaClient {
@@ -67,7 +47,9 @@ function createPrismaClient(): PrismaClient {
   if (!url) {
     throw new Error("DATABASE_URL is not set");
   }
-  const adapter = new PrismaMariaDb(buildPoolConfig(url));
+  const pool = buildPool(url);
+  globalForPrisma.pgPool = pool;
+  const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
 }
 
@@ -96,5 +78,9 @@ export async function resetPrismaClient(): Promise<void> {
   if (globalForPrisma.prisma) {
     await globalForPrisma.prisma.$disconnect().catch(() => {});
     globalForPrisma.prisma = undefined;
+  }
+  if (globalForPrisma.pgPool) {
+    await globalForPrisma.pgPool.end().catch(() => {});
+    globalForPrisma.pgPool = undefined;
   }
 }

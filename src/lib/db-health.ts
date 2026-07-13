@@ -77,13 +77,13 @@ export function invalidateDatabaseHealth(): void {
   globalHealth.dbHealth = undefined;
 }
 
-/** Hint for toasts — remote DB (Railway) can be slow on first connect. */
+/** Hint for toasts — remote DB (e.g. Render) can be slow on first connect. */
 export function databaseConnectionHint(): string {
   if (!isDatabaseConfigured()) {
-    return "Add DATABASE_URL to .env.local (Railway public URL).";
+    return "Add DATABASE_URL to .env.local (Render Postgres URL).";
   }
   if (isRemoteDatabase()) {
-    return "Could not reach Railway MySQL. Check the public URL in .env.local and restart npm run dev.";
+    return "Could not reach Postgres. Check DATABASE_URL in .env.local and restart npm run dev.";
   }
-  return "Could not reach MySQL. Ensure the server is running locally.";
+  return "Could not reach Postgres. Ensure the server is running locally.";
 }
