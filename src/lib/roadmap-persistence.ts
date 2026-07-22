@@ -1,3 +1,8 @@
+/**
+ * Legacy localStorage helpers for a single roadmap.
+ * Prefer API + in-memory/DB stores; kept for offline merge compatibility.
+ */
+
 import type { EntryStatus, RoadmapDayProgress, RoadmapOverview, TimeBlockId } from "./types";
 import {
   ROADMAP_ID,
@@ -31,6 +36,13 @@ function defaultState(): RoadmapPersistedState {
   };
 }
 
+function normalizeProgress(p: RoadmapDayProgress): RoadmapDayProgress {
+  return {
+    ...p,
+    taskStatuses: p.taskStatuses ?? {},
+  };
+}
+
 export function loadRoadmapState(): RoadmapPersistedState {
   if (typeof window === "undefined") return defaultState();
   try {
@@ -38,7 +50,7 @@ export function loadRoadmapState(): RoadmapPersistedState {
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw) as RoadmapPersistedState;
     const byDay = new Map(
-      (parsed.progress ?? []).map((p) => [p.dayNumber, p]),
+      (parsed.progress ?? []).map((p) => [p.dayNumber, normalizeProgress(p)]),
     );
     return {
       startedAt: parsed.startedAt ?? null,
@@ -75,6 +87,7 @@ function syncDayCompleted(p: RoadmapDayProgress): RoadmapDayProgress {
   const wasDone = p.dayCompleted;
   return {
     ...p,
+    taskStatuses: p.taskStatuses ?? {},
     dayCompleted: allDone,
     completedAt: allDone && !wasDone ? today() : allDone ? p.completedAt : null,
   };
@@ -90,7 +103,7 @@ export function buildRoadmapOverview(state: RoadmapPersistedState): RoadmapOverv
     currentDay: getFirstIncompleteDay(state.progress),
     days: ROADMAP_DAYS,
     timeBlocks: TIME_BLOCKS,
-    progress: state.progress,
+    progress: state.progress.map(normalizeProgress),
     stats: computeRoadmapStats(state.progress),
     streaks: computeRoadmapStreaks(state.progress, state.activityByDate),
     activityByDate: state.activityByDate,
@@ -113,7 +126,11 @@ export function updateBlockInStorage(
   const idx = state.progress.findIndex((p) => p.dayNumber === dayNumber);
   if (idx === -1) return { state, dayJustCompleted: false };
 
-  const p = { ...state.progress[idx], blocks: { ...state.progress[idx].blocks } };
+  const p = {
+    ...state.progress[idx],
+    blocks: { ...state.progress[idx].blocks },
+    taskStatuses: { ...(state.progress[idx].taskStatuses ?? {}) },
+  };
   const wasCompleted = p.blocks[blockId] === "completed";
   const nowCompleted = status === "completed";
   p.blocks[blockId] = status;
@@ -140,7 +157,7 @@ export function updateDayNotesInStorage(
   const idx = state.progress.findIndex((p) => p.dayNumber === dayNumber);
   if (idx === -1) return state;
 
-  const p = { ...state.progress[idx] };
+  const p = { ...state.progress[idx], taskStatuses: { ...(state.progress[idx].taskStatuses ?? {}) } };
   if (data.notes !== undefined) p.notes = data.notes;
   if (data.builtItems !== undefined) p.builtItems = data.builtItems;
   if (data.learnNotes !== undefined) p.learnNotes = data.learnNotes;
@@ -150,19 +167,18 @@ export function updateDayNotesInStorage(
   return state;
 }
 
-/** Merge API progress into local state when API has newer updates. */
 export function mergeRoadmapState(
   local: RoadmapPersistedState,
   apiProgress: RoadmapDayProgress[],
   apiStartedAt: string | null,
   apiActivity: Record<string, number>,
 ): RoadmapPersistedState {
-  const byDay = new Map(local.progress.map((p) => [p.dayNumber, p]));
+  const byDay = new Map(local.progress.map((p) => [p.dayNumber, normalizeProgress(p)]));
 
   for (const apiDay of apiProgress) {
     const existing = byDay.get(apiDay.dayNumber);
     if (!existing || apiDay.updatedAt > existing.updatedAt) {
-      byDay.set(apiDay.dayNumber, apiDay);
+      byDay.set(apiDay.dayNumber, normalizeProgress(apiDay));
     }
   }
 
@@ -183,7 +199,7 @@ export function mergeRoadmapState(
 export function saveRoadmapFromOverview(overview: RoadmapOverview): void {
   saveRoadmapState({
     startedAt: overview.startedAt,
-    progress: overview.progress,
+    progress: overview.progress.map(normalizeProgress),
     activityByDate: overview.activityByDate,
   });
 }

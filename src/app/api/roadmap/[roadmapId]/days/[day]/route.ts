@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { getDayByNumber } from "@/lib/nestjs-roadmap-data";
 import {
   getDayProgress,
   updateBlockStatus,
+  updateTaskStatus,
   updateDayNotes,
   checkDayAccess,
   getRoadmapOverview,
@@ -10,17 +10,19 @@ import {
 import {
   getDayProgressDb,
   updateBlockStatusDb,
+  updateTaskStatusDb,
   updateDayNotesDb,
   checkDayAccessDb,
   getRoadmapOverviewDb,
 } from "@/lib/roadmap-db";
 import { jsonWithSource, resolveDataSource, withDatabase } from "@/lib/api-db";
+import { getRoadmapDefinition } from "@/lib/roadmap-registry";
 import type { EntryStatus, TimeBlockId } from "@/lib/types";
 
 const VALID_BLOCKS: TimeBlockId[] = ["learn", "rebuild", "build", "test"];
 const VALID_STATUSES: EntryStatus[] = ["pending", "completed", "skipped", "missed"];
 
-function lockedResponse(dayNumber: number, access: {
+function lockedResponse(access: {
   allowed: boolean;
   message: string | null;
   requiredDay: number | null;
@@ -37,39 +39,41 @@ function lockedResponse(dayNumber: number, access: {
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ day: string }> },
+  { params }: { params: Promise<{ roadmapId: string; day: string }> },
 ) {
-  const { day } = await params;
+  const { roadmapId, day } = await params;
+  const def = getRoadmapDefinition(roadmapId);
   const dayNumber = Number.parseInt(day, 10);
-  const curriculum = getDayByNumber(dayNumber);
-  if (!curriculum) {
+  const curriculum = def?.days.find((d) => d.dayNumber === dayNumber);
+  if (!def || !curriculum) {
     return NextResponse.json({ error: "Day not found" }, { status: 404 });
   }
 
   const source = await resolveDataSource();
 
   if (source === "fallback") {
-    const progress = getDayProgress(dayNumber);
+    const progress = getDayProgress(roadmapId, dayNumber);
     if (!progress) return NextResponse.json({ error: "Day not found" }, { status: 404 });
-    const access = checkDayAccess(dayNumber);
-    if (!access.allowed) return lockedResponse(dayNumber, access);
+    const access = checkDayAccess(roadmapId, dayNumber);
+    if (!access.allowed) return lockedResponse(access);
+    const overview = getRoadmapOverview(roadmapId);
     return jsonWithSource(
       {
         day: curriculum,
         progress,
         unlocked: true,
-        currentDay: getRoadmapOverview().currentDay,
-        streaks: getRoadmapOverview().streaks,
+        currentDay: overview.currentDay,
+        streaks: overview.streaks,
       },
       "fallback",
     );
   }
 
   const accessResult = await withDatabase(async () => {
-    const access = await checkDayAccessDb(dayNumber);
+    const access = await checkDayAccessDb(roadmapId, dayNumber);
     if (!access.allowed) return { locked: true as const, access };
-    const progress = await getDayProgressDb(dayNumber);
-    const overview = await getRoadmapOverviewDb();
+    const progress = await getDayProgressDb(roadmapId, dayNumber);
+    const overview = await getRoadmapOverviewDb(roadmapId);
     return {
       locked: false as const,
       day: curriculum,
@@ -84,23 +88,37 @@ export async function GET(
     return NextResponse.json({ error: accessResult.message }, { status: 503 });
   }
   if (accessResult.value.locked) {
-    return lockedResponse(dayNumber, accessResult.value.access);
+    return lockedResponse(accessResult.value.access);
   }
   return jsonWithSource(accessResult.value, "database");
 }
 
 export async function PATCH(
   req: Request,
-  { params }: { params: Promise<{ day: string }> },
+  { params }: { params: Promise<{ roadmapId: string; day: string }> },
 ) {
-  const { day } = await params;
+  const { roadmapId, day } = await params;
+  const def = getRoadmapDefinition(roadmapId);
   const dayNumber = Number.parseInt(day, 10);
+  if (!def || Number.isNaN(dayNumber) || dayNumber < 1 || dayNumber > def.days.length) {
+    return NextResponse.json({ error: "Day not found" }, { status: 404 });
+  }
+
   const body = await req.json();
   const source = await resolveDataSource();
 
   if (source === "fallback") {
-    const access = checkDayAccess(dayNumber);
-    if (!access.allowed) return lockedResponse(dayNumber, access);
+    const access = checkDayAccess(roadmapId, dayNumber);
+    if (!access.allowed) return lockedResponse(access);
+
+    if (body.taskId && body.status) {
+      if (!VALID_STATUSES.includes(body.status)) {
+        return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+      }
+      const updated = updateTaskStatus(roadmapId, dayNumber, body.taskId, body.status);
+      if (!updated) return NextResponse.json({ error: "Day not found" }, { status: 404 });
+      return jsonWithSource(updated, "fallback");
+    }
 
     if (body.blockId && body.status) {
       if (!VALID_BLOCKS.includes(body.blockId)) {
@@ -109,24 +127,36 @@ export async function PATCH(
       if (!VALID_STATUSES.includes(body.status)) {
         return NextResponse.json({ error: "Invalid status" }, { status: 400 });
       }
-      const updated = updateBlockStatus(dayNumber, body.blockId, body.status);
+      const updated = updateBlockStatus(roadmapId, dayNumber, body.blockId, body.status);
       if (!updated) return NextResponse.json({ error: "Day not found" }, { status: 404 });
       return jsonWithSource(updated, "fallback");
     }
 
-    const updated = updateDayNotes(dayNumber, {
+    const updated = updateDayNotes(roadmapId, dayNumber, {
       notes: body.notes,
       builtItems: body.builtItems,
       learnNotes: body.learnNotes,
-      dayCompleted: body.dayCompleted,
     });
     if (!updated) return NextResponse.json({ error: "Day not found" }, { status: 404 });
     return jsonWithSource(updated, "fallback");
   }
 
   const accessResult = await withDatabase(async () => {
-    const access = await checkDayAccessDb(dayNumber);
+    const access = await checkDayAccessDb(roadmapId, dayNumber);
     if (!access.allowed) return { locked: true as const, access };
+
+    if (body.taskId && body.status) {
+      if (!VALID_STATUSES.includes(body.status)) {
+        return { error: "Invalid status" as const };
+      }
+      const updated = await updateTaskStatusDb(
+        roadmapId,
+        dayNumber,
+        body.taskId,
+        body.status,
+      );
+      return { locked: false as const, updated };
+    }
 
     if (body.blockId && body.status) {
       if (!VALID_BLOCKS.includes(body.blockId)) {
@@ -135,11 +165,16 @@ export async function PATCH(
       if (!VALID_STATUSES.includes(body.status)) {
         return { error: "Invalid status" as const };
       }
-      const updated = await updateBlockStatusDb(dayNumber, body.blockId, body.status);
+      const updated = await updateBlockStatusDb(
+        roadmapId,
+        dayNumber,
+        body.blockId,
+        body.status,
+      );
       return { locked: false as const, updated };
     }
 
-    const updated = await updateDayNotesDb(dayNumber, {
+    const updated = await updateDayNotesDb(roadmapId, dayNumber, {
       notes: body.notes,
       builtItems: body.builtItems,
       learnNotes: body.learnNotes,
@@ -151,14 +186,11 @@ export async function PATCH(
     return NextResponse.json({ error: accessResult.message }, { status: 503 });
   }
   const value = accessResult.value;
-  if ("error" in value && value.error === "Invalid block") {
-    return NextResponse.json({ error: "Invalid block" }, { status: 400 });
-  }
-  if ("error" in value && value.error === "Invalid status") {
-    return NextResponse.json({ error: "Invalid status" }, { status: 400 });
+  if ("error" in value && value.error) {
+    return NextResponse.json({ error: value.error }, { status: 400 });
   }
   if (value.locked) {
-    return lockedResponse(dayNumber, value.access);
+    return lockedResponse(value.access);
   }
   if (!value.updated) {
     return NextResponse.json({ error: "Day not found" }, { status: 404 });

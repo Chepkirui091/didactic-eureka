@@ -2,13 +2,14 @@
 
 import { useCallback } from "react";
 import type { EntryStatus, RoadmapDayProgress, RoadmapOverview, TimeBlockId } from "@/lib/types";
-import { isDayUnlocked, getDayLockMessage } from "@/lib/nestjs-roadmap-data";
+import { isDayUnlocked, getDayLockMessage } from "@/lib/roadmap-core";
 import { celebrateCompletion, celebrateDayComplete } from "@/components/celebration";
 import { isFallbackResponse, readApiError } from "@/lib/api-response";
 import { toastError, toastSavedToDb } from "@/lib/toast-messages";
 import {
   applyRoadmapBlockUpdate,
   applyRoadmapDayNotes,
+  applyRoadmapTaskUpdate,
   cacheRoadmapOverview,
   getRoadmap,
   refetchRoadmapAfterMutation,
@@ -16,26 +17,29 @@ import {
 import { CacheKeys, readCache } from "@/lib/client-cache";
 import { useCachedData } from "@/hooks/use-cached-data";
 
-export function useRoadmap() {
-  const fetcher = useCallback((force: boolean) => getRoadmap(force), []);
+export function useRoadmap(roadmapId: string) {
+  const fetcher = useCallback(
+    (force: boolean) => getRoadmap(roadmapId, force),
+    [roadmapId],
+  );
   const { data: roadmap, loading, setData, refresh } = useCachedData<RoadmapOverview>(
-    CacheKeys.roadmap,
+    CacheKeys.roadmapId(roadmapId),
     fetcher,
   );
 
   const revertToCachedRoadmap = useCallback(() => {
-    const cached = readCache<RoadmapOverview>(CacheKeys.roadmap);
+    const cached = readCache<RoadmapOverview>(CacheKeys.roadmapId(roadmapId));
     if (cached?.source === "database") setData(cached.data);
     else void refresh();
-  }, [setData, refresh]);
+  }, [roadmapId, setData, refresh]);
 
   const startRoadmap = useCallback(async () => {
-    const res = await fetch("/api/roadmap", { method: "POST" });
+    const res = await fetch(`/api/roadmap/${roadmapId}`, { method: "POST" });
     if (res.ok && !isFallbackResponse(res)) {
       const overview = (await res.json()) as RoadmapOverview;
       cacheRoadmapOverview(overview);
       setData(overview);
-      toastSavedToDb("Roadmap started");
+      toastSavedToDb("Project started");
       return;
     }
     toastError(
@@ -43,7 +47,7 @@ export function useRoadmap() {
         ? "Could not save to database — try again when the connection is stable"
         : await readApiError(res),
     );
-  }, [setData]);
+  }, [roadmapId, setData]);
 
   const updateBlock = useCallback(
     async (dayNumber: number, blockId: TimeBlockId, status: EntryStatus) => {
@@ -57,7 +61,7 @@ export function useRoadmap() {
       );
       setData(optimistic);
 
-      const res = await fetch(`/api/roadmap/days/${dayNumber}`, {
+      const res = await fetch(`/api/roadmap/${roadmapId}/days/${dayNumber}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ blockId, status }),
@@ -65,7 +69,7 @@ export function useRoadmap() {
 
       if (res.ok && !isFallbackResponse(res)) {
         toastSavedToDb("Progress saved");
-        const overview = await refetchRoadmapAfterMutation();
+        const overview = await refetchRoadmapAfterMutation(roadmapId);
         setData(overview);
 
         if (status === "completed") {
@@ -85,7 +89,50 @@ export function useRoadmap() {
           : await readApiError(res),
       );
     },
-    [roadmap, setData, revertToCachedRoadmap],
+    [roadmap, roadmapId, setData, revertToCachedRoadmap],
+  );
+
+  const updateTask = useCallback(
+    async (dayNumber: number, taskId: string, status: EntryStatus) => {
+      if (!roadmap) return;
+
+      const { overview: optimistic, dayJustCompleted } = applyRoadmapTaskUpdate(
+        roadmap,
+        dayNumber,
+        taskId,
+        status,
+      );
+      setData(optimistic);
+
+      const res = await fetch(`/api/roadmap/${roadmapId}/days/${dayNumber}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, status }),
+      });
+
+      if (res.ok && !isFallbackResponse(res)) {
+        toastSavedToDb("Task updated");
+        const overview = await refetchRoadmapAfterMutation(roadmapId);
+        setData(overview);
+
+        if (status === "completed") {
+          celebrateCompletion();
+          const savedDay = overview.progress.find((p) => p.dayNumber === dayNumber);
+          if (savedDay?.dayCompleted && dayJustCompleted) {
+            celebrateDayComplete();
+          }
+        }
+        return;
+      }
+
+      revertToCachedRoadmap();
+      toastError(
+        res.ok
+          ? "Could not save to database — progress reverted"
+          : await readApiError(res),
+      );
+    },
+    [roadmap, roadmapId, setData, revertToCachedRoadmap],
   );
 
   const saveDayNotes = useCallback(
@@ -97,7 +144,7 @@ export function useRoadmap() {
 
       setData(applyRoadmapDayNotes(roadmap, dayNumber, data));
 
-      const res = await fetch(`/api/roadmap/days/${dayNumber}`, {
+      const res = await fetch(`/api/roadmap/${roadmapId}/days/${dayNumber}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -105,7 +152,7 @@ export function useRoadmap() {
 
       if (res.ok && !isFallbackResponse(res)) {
         toastSavedToDb("Notes saved to database");
-        const overview = await refetchRoadmapAfterMutation();
+        const overview = await refetchRoadmapAfterMutation(roadmapId);
         setData(overview);
         return overview.progress.find((p) => p.dayNumber === dayNumber) ?? null;
       }
@@ -116,17 +163,19 @@ export function useRoadmap() {
           ? "Could not save notes to database — reverted"
           : await readApiError(res),
       );
-      return readCache<RoadmapOverview>(CacheKeys.roadmap)?.data.progress.find(
-        (p) => p.dayNumber === dayNumber,
-      ) ?? null;
+      return (
+        readCache<RoadmapOverview>(CacheKeys.roadmapId(roadmapId))?.data.progress.find(
+          (p) => p.dayNumber === dayNumber,
+        ) ?? null
+      );
     },
-    [roadmap, setData, revertToCachedRoadmap],
+    [roadmap, roadmapId, setData, revertToCachedRoadmap],
   );
 
   const checkDayAccess = useCallback(
     (dayNumber: number) => {
       if (!roadmap) return { allowed: true, message: null, requiredDay: null };
-      if (isDayUnlocked(dayNumber, roadmap.progress)) {
+      if (isDayUnlocked(dayNumber, roadmap.progress, roadmap.totalDays)) {
         return { allowed: true, message: null, requiredDay: null };
       }
       for (let d = 1; d < dayNumber; d++) {
@@ -134,7 +183,7 @@ export function useRoadmap() {
         if (!p?.dayCompleted) {
           return {
             allowed: false,
-            message: getDayLockMessage(dayNumber, roadmap.progress),
+            message: getDayLockMessage(dayNumber, roadmap.progress, roadmap.totalDays),
             requiredDay: d,
           };
         }
@@ -156,6 +205,7 @@ export function useRoadmap() {
     refresh,
     startRoadmap,
     updateBlock,
+    updateTask,
     saveDayNotes,
     checkDayAccess,
     getDayProgress,

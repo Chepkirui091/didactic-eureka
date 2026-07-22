@@ -1,71 +1,101 @@
 /**
- * In-memory store for NestJS roadmap progress (demo mode).
- * Replace with Prisma when DATABASE_URL is configured.
+ * In-memory store for roadmap progress (demo / offline fallback).
  */
 
-import type { EntryStatus, RoadmapDayProgress, RoadmapOverview, TimeBlockId } from "./types";
+import type {
+  EntryStatus,
+  RoadmapDayProgress,
+  RoadmapOverview,
+  RoadmapSummary,
+  TimeBlockId,
+} from "./types";
 import {
-  ROADMAP_ID,
-  ROADMAP_TITLE,
-  ROADMAP_DESCRIPTION,
-  ROADMAP_DAYS,
-  TIME_BLOCKS,
   createEmptyDayProgress,
   computeRoadmapStats,
   isDayUnlocked,
   getDayLockMessage,
   getFirstIncompleteDay,
   computeRoadmapStreaks,
-} from "./nestjs-roadmap-data";
+  isDayFullyComplete,
+  definitionToSummary,
+  type RoadmapDefinition,
+} from "./roadmap-core";
+import { ROADMAP_DEFINITIONS, requireRoadmapDefinition, getRoadmapDefinition } from "./roadmap-registry";
 
-const progressMap = new Map<number, RoadmapDayProgress>();
-const activityByDate = new Map<string, number>();
-let startedAt: string | null = null;
+type StoreState = {
+  progressMap: Map<number, RoadmapDayProgress>;
+  activityByDate: Map<string, number>;
+  startedAt: string | null;
+};
+
+const stores = new Map<string, StoreState>();
+
+function getStore(roadmapId: string): StoreState {
+  let store = stores.get(roadmapId);
+  if (!store) {
+    store = {
+      progressMap: new Map(),
+      activityByDate: new Map(),
+      startedAt: null,
+    };
+    stores.set(roadmapId, store);
+  }
+  return store;
+}
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function activityRecord(): Record<string, number> {
-  return Object.fromEntries(activityByDate);
+function activityRecord(store: StoreState): Record<string, number> {
+  return Object.fromEntries(store.activityByDate);
 }
 
-function adjustActivity(date: string, delta: number): void {
-  const next = (activityByDate.get(date) ?? 0) + delta;
-  if (next <= 0) activityByDate.delete(date);
-  else activityByDate.set(date, next);
+function adjustActivity(store: StoreState, date: string, delta: number): void {
+  const next = (store.activityByDate.get(date) ?? 0) + delta;
+  if (next <= 0) store.activityByDate.delete(date);
+  else store.activityByDate.set(date, next);
 }
 
-function ensureDay(dayNumber: number): RoadmapDayProgress {
-  let p = progressMap.get(dayNumber);
+function ensureDay(def: RoadmapDefinition, dayNumber: number): RoadmapDayProgress {
+  const store = getStore(def.id);
+  let p = store.progressMap.get(dayNumber);
   if (!p) {
-    p = createEmptyDayProgress(dayNumber);
-    progressMap.set(dayNumber, p);
+    p = createEmptyDayProgress(dayNumber, def.timeBlocks);
+    store.progressMap.set(dayNumber, p);
   }
+  if (!p.taskStatuses) p.taskStatuses = {};
   return p;
 }
 
-function getAllProgress(): RoadmapDayProgress[] {
-  return ROADMAP_DAYS.map((d) => ensureDay(d.dayNumber));
+function getAllProgress(def: RoadmapDefinition): RoadmapDayProgress[] {
+  return def.days.map((d) => ensureDay(def, d.dayNumber));
 }
 
-function getCurrentDay(): number {
-  return getFirstIncompleteDay(getAllProgress());
+export function listRoadmapSummaries(): RoadmapSummary[] {
+  return ROADMAP_DEFINITIONS.map((def) => {
+    const overview = getRoadmapOverview(def.id);
+    return definitionToSummary(def, overview);
+  });
 }
 
-export function checkDayAccess(dayNumber: number): {
+export function checkDayAccess(
+  roadmapId: string,
+  dayNumber: number,
+): {
   allowed: boolean;
   message: string | null;
   requiredDay: number | null;
 } {
-  const progress = getAllProgress();
-  if (!isDayUnlocked(dayNumber, progress)) {
+  const def = requireRoadmapDefinition(roadmapId);
+  const progress = getAllProgress(def);
+  if (!isDayUnlocked(dayNumber, progress, def.days.length)) {
     for (let d = 1; d < dayNumber; d++) {
       const p = progress.find((x) => x.dayNumber === d);
       if (!p?.dayCompleted) {
         return {
           allowed: false,
-          message: getDayLockMessage(dayNumber, progress),
+          message: getDayLockMessage(dayNumber, progress, def.days.length),
           requiredDay: d,
         };
       }
@@ -74,79 +104,110 @@ export function checkDayAccess(dayNumber: number): {
   return { allowed: true, message: null, requiredDay: null };
 }
 
-export function getRoadmapOverview(): RoadmapOverview {
-  const progress = getAllProgress();
-  const activity = activityRecord();
+export function getRoadmapOverview(roadmapId: string): RoadmapOverview {
+  const def = requireRoadmapDefinition(roadmapId);
+  const store = getStore(def.id);
+  const progress = getAllProgress(def);
+  const activity = activityRecord(store);
   return {
-    id: ROADMAP_ID,
-    title: ROADMAP_TITLE,
-    description: ROADMAP_DESCRIPTION,
-    totalDays: ROADMAP_DAYS.length,
-    startedAt,
-    currentDay: getCurrentDay(),
-    days: ROADMAP_DAYS,
-    timeBlocks: TIME_BLOCKS,
+    id: def.id,
+    title: def.title,
+    description: def.description,
+    totalDays: def.days.length,
+    startedAt: store.startedAt,
+    currentDay: getFirstIncompleteDay(progress, def.days.length),
+    days: def.days,
+    timeBlocks: def.timeBlocks,
+    weekGoals: def.weekGoals,
+    accent: def.accent,
+    tags: def.tags,
     progress,
-    stats: computeRoadmapStats(progress),
-    streaks: computeRoadmapStreaks(progress, activity),
+    stats: computeRoadmapStats(def.days, progress, def.timeBlocks),
+    streaks: computeRoadmapStreaks(progress, activity, def.days.length),
     activityByDate: activity,
   };
 }
 
-export function getDayProgress(dayNumber: number): RoadmapDayProgress | null {
-  if (dayNumber < 1 || dayNumber > 30) return null;
-  return ensureDay(dayNumber);
-}
-
-export function startRoadmap(): RoadmapOverview {
-  if (!startedAt) startedAt = new Date().toISOString();
-  return getRoadmapOverview();
+export function startRoadmap(roadmapId: string): RoadmapOverview {
+  const def = requireRoadmapDefinition(roadmapId);
+  const store = getStore(def.id);
+  if (!store.startedAt) store.startedAt = new Date().toISOString();
+  ensureDay(def, 1);
+  return getRoadmapOverview(def.id);
 }
 
 export function updateBlockStatus(
+  roadmapId: string,
   dayNumber: number,
   blockId: TimeBlockId,
   status: EntryStatus,
 ): RoadmapDayProgress | null {
-  if (dayNumber < 1 || dayNumber > 30) return null;
-  const p = ensureDay(dayNumber);
-  const wasCompleted = p.blocks[blockId] === "completed";
-  const nowCompleted = status === "completed";
-  p.blocks[blockId] = status;
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  const store = getStore(def.id);
+  if (!store.startedAt) store.startedAt = new Date().toISOString();
+
+  const p = ensureDay(def, dayNumber);
+  const prev = p.blocks[blockId];
+  p.blocks = { ...p.blocks, [blockId]: status };
   p.updatedAt = new Date().toISOString();
-  if (!wasCompleted && nowCompleted) adjustActivity(today(), 1);
-  else if (wasCompleted && !nowCompleted) adjustActivity(today(), -1);
-  syncDayCompleted(p);
+
+  const date = today();
+  if (prev !== "completed" && status === "completed") adjustActivity(store, date, 1);
+  if (prev === "completed" && status !== "completed") adjustActivity(store, date, -1);
+
+  const day = def.days.find((d) => d.dayNumber === dayNumber);
+  p.dayCompleted = isDayFullyComplete(day, p, def.timeBlocks);
+  p.completedAt = p.dayCompleted ? date : null;
+  return p;
+}
+
+export function updateTaskStatus(
+  roadmapId: string,
+  dayNumber: number,
+  taskId: string,
+  status: EntryStatus,
+): RoadmapDayProgress | null {
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  const store = getStore(def.id);
+  if (!store.startedAt) store.startedAt = new Date().toISOString();
+
+  const p = ensureDay(def, dayNumber);
+  const prev = p.taskStatuses[taskId] ?? "pending";
+  p.taskStatuses = { ...p.taskStatuses, [taskId]: status };
+  p.updatedAt = new Date().toISOString();
+
+  const date = today();
+  if (prev !== "completed" && status === "completed") adjustActivity(store, date, 1);
+  if (prev === "completed" && status !== "completed") adjustActivity(store, date, -1);
+
+  const day = def.days.find((d) => d.dayNumber === dayNumber);
+  p.dayCompleted = isDayFullyComplete(day, p, def.timeBlocks);
+  p.completedAt = p.dayCompleted ? date : null;
   return p;
 }
 
 export function updateDayNotes(
+  roadmapId: string,
   dayNumber: number,
-  data: {
-    notes?: string;
-    builtItems?: string;
-    learnNotes?: string;
-    dayCompleted?: boolean;
-  },
+  data: { notes?: string; builtItems?: string; learnNotes?: string },
 ): RoadmapDayProgress | null {
-  if (dayNumber < 1 || dayNumber > 30) return null;
-  const p = ensureDay(dayNumber);
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  const p = ensureDay(def, dayNumber);
   if (data.notes !== undefined) p.notes = data.notes;
   if (data.builtItems !== undefined) p.builtItems = data.builtItems;
   if (data.learnNotes !== undefined) p.learnNotes = data.learnNotes;
-  if (data.dayCompleted !== undefined) p.dayCompleted = data.dayCompleted;
   p.updatedAt = new Date().toISOString();
-  if (data.dayCompleted === undefined) syncDayCompleted(p);
   return p;
 }
 
-function syncDayCompleted(p: RoadmapDayProgress): void {
-  const allDone = TIME_BLOCKS.every((b) => p.blocks[b.id] === "completed");
-  const wasDone = p.dayCompleted;
-  p.dayCompleted = allDone;
-  if (allDone && !wasDone) {
-    p.completedAt = today();
-  } else if (!allDone) {
-    p.completedAt = null;
-  }
+export function getDayProgress(
+  roadmapId: string,
+  dayNumber: number,
+): RoadmapDayProgress | null {
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  return ensureDay(def, dayNumber);
 }

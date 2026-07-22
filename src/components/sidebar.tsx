@@ -17,7 +17,7 @@ import {
 export const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/habits", label: "Habits", icon: CheckSquare },
-  { href: "/roadmap", label: "NestJS Roadmap", icon: Compass },
+  { href: "/roadmap", label: "Projects", icon: Compass },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/reminders", label: "Reminders", icon: Bell },
   { href: "/achievements", label: "Achievements", icon: Trophy },

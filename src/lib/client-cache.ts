@@ -15,6 +15,8 @@ export const CacheKeys = {
   entriesHabit: (habitId: string) => `entries:habit:${habitId}`,
   activity: (days: number) => `activity:${days}`,
   roadmap: "roadmap",
+  roadmapId: (id: string) => `roadmap:${id}`,
+  roadmaps: "roadmaps",
   habit: (id: string) => `habit:${id}`,
 } as const;
 
@@ -111,6 +113,11 @@ export function invalidateHabitRelatedCaches(habitId?: string): void {
   }
 }
 
-export function invalidateRoadmapCache(): void {
-  invalidateCache(CacheKeys.roadmap);
+export function invalidateRoadmapCache(roadmapId?: string): void {
+  invalidateCache(CacheKeys.roadmap, CacheKeys.roadmaps);
+  if (roadmapId) {
+    invalidateCache(CacheKeys.roadmapId(roadmapId));
+  } else {
+    invalidateByPrefix("roadmap:");
+  }
 }
