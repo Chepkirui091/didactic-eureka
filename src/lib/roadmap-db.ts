@@ -1,23 +1,28 @@
-import type { EntryStatus, RoadmapDayProgress, RoadmapOverview, TimeBlockId } from "./types";
+import type {
+  EntryStatus,
+  RoadmapDayProgress,
+  RoadmapOverview,
+  RoadmapSummary,
+  TimeBlockId,
+} from "./types";
 import {
-  ROADMAP_ID,
-  ROADMAP_TITLE,
-  ROADMAP_DESCRIPTION,
-  ROADMAP_DAYS,
-  TIME_BLOCKS,
   createEmptyDayProgress,
   computeRoadmapStats,
   getFirstIncompleteDay,
   computeRoadmapStreaks,
   isDayUnlocked,
   getDayLockMessage,
-} from "./nestjs-roadmap-data";
+  isDayFullyComplete,
+  definitionToSummary,
+  type RoadmapDefinition,
+} from "./roadmap-core";
+import { getRoadmapDefinition, ROADMAP_DEFINITIONS, requireRoadmapDefinition } from "./roadmap-registry";
 import { getPrisma } from "./prisma";
 import { DEMO_USER_ID, ensureDemoUser } from "./habits-db";
 
-function defaultBlocks(): Record<TimeBlockId, EntryStatus> {
+function defaultBlocks(def: RoadmapDefinition): Record<TimeBlockId, EntryStatus> {
   const blocks = {} as Record<TimeBlockId, EntryStatus>;
-  for (const block of TIME_BLOCKS) blocks[block.id] = "pending";
+  for (const block of def.timeBlocks) blocks[block.id] = "pending";
   return blocks;
 }
 
@@ -25,19 +30,25 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function rowToProgress(row: {
-  dayNumber: number;
-  blocks: unknown;
-  notes: string | null;
-  builtItems: string | null;
-  learnNotes: string | null;
-  dayCompleted: boolean;
-  updatedAt: Date;
-}): RoadmapDayProgress {
-  const blocks = (row.blocks ?? defaultBlocks()) as Record<TimeBlockId, EntryStatus>;
+function rowToProgress(
+  row: {
+    dayNumber: number;
+    blocks: unknown;
+    taskStatuses?: unknown;
+    notes: string | null;
+    builtItems: string | null;
+    learnNotes: string | null;
+    dayCompleted: boolean;
+    updatedAt: Date;
+  },
+  def: RoadmapDefinition,
+): RoadmapDayProgress {
+  const blocks = (row.blocks ?? defaultBlocks(def)) as Record<TimeBlockId, EntryStatus>;
+  const taskStatuses = (row.taskStatuses ?? {}) as Record<string, EntryStatus>;
   return {
     dayNumber: row.dayNumber,
     blocks,
+    taskStatuses,
     notes: row.notes ?? "",
     builtItems: row.builtItems ?? "",
     learnNotes: row.learnNotes ?? "",
@@ -47,11 +58,16 @@ function rowToProgress(row: {
   };
 }
 
-function computeActivityFromProgress(progress: RoadmapDayProgress[]): Record<string, number> {
+function computeActivityFromProgress(
+  def: RoadmapDefinition,
+  progress: RoadmapDayProgress[],
+): Record<string, number> {
   const activity: Record<string, number> = {};
   for (const p of progress) {
     const date = p.updatedAt.slice(0, 10);
-    const completedCount = TIME_BLOCKS.filter((b) => p.blocks[b.id] === "completed").length;
+    const blockCount = def.timeBlocks.filter((b) => p.blocks[b.id] === "completed").length;
+    const taskCount = Object.values(p.taskStatuses).filter((s) => s === "completed").length;
+    const completedCount = blockCount + taskCount;
     if (completedCount > 0) {
       activity[date] = (activity[date] ?? 0) + completedCount;
     }
@@ -59,87 +75,109 @@ function computeActivityFromProgress(progress: RoadmapDayProgress[]): Record<str
   return activity;
 }
 
-async function loadAllProgress(): Promise<RoadmapDayProgress[]> {
+async function loadAllProgress(def: RoadmapDefinition): Promise<RoadmapDayProgress[]> {
   await ensureDemoUser();
   const rows = await getPrisma().roadmapDayProgress.findMany({
-    where: { userId: DEMO_USER_ID, roadmapId: ROADMAP_ID },
+    where: { userId: DEMO_USER_ID, roadmapId: def.id },
   });
-  const byDay = new Map(rows.map((r) => [r.dayNumber, rowToProgress(r)]));
-  return ROADMAP_DAYS.map(
-    (d) => byDay.get(d.dayNumber) ?? createEmptyDayProgress(d.dayNumber),
+  const byDay = new Map(rows.map((r) => [r.dayNumber, rowToProgress(r, def)]));
+  return def.days.map(
+    (d) => byDay.get(d.dayNumber) ?? createEmptyDayProgress(d.dayNumber, def.timeBlocks),
   );
 }
 
-async function ensureDayRow(dayNumber: number) {
+async function ensureDayRow(def: RoadmapDefinition, dayNumber: number) {
   await ensureDemoUser();
   return getPrisma().roadmapDayProgress.upsert({
     where: {
       userId_roadmapId_dayNumber: {
         userId: DEMO_USER_ID,
-        roadmapId: ROADMAP_ID,
+        roadmapId: def.id,
         dayNumber,
       },
     },
     update: {},
     create: {
       userId: DEMO_USER_ID,
-      roadmapId: ROADMAP_ID,
+      roadmapId: def.id,
       dayNumber,
-      blocks: defaultBlocks(),
+      blocks: defaultBlocks(def),
+      taskStatuses: {},
     },
   });
 }
 
-function syncDayCompleted(blocks: Record<TimeBlockId, EntryStatus>): boolean {
-  return TIME_BLOCKS.every((b) => blocks[b.id] === "completed");
+export async function listRoadmapSummariesDb(): Promise<RoadmapSummary[]> {
+  const summaries: RoadmapSummary[] = [];
+  for (const def of ROADMAP_DEFINITIONS) {
+    try {
+      const overview = await getRoadmapOverviewDb(def.id);
+      summaries.push(definitionToSummary(def, overview));
+    } catch {
+      summaries.push(definitionToSummary(def, null));
+    }
+  }
+  return summaries;
 }
 
-export async function getRoadmapOverviewDb(): Promise<RoadmapOverview> {
-  const progress = await loadAllProgress();
-  const activity = computeActivityFromProgress(progress);
+export async function getRoadmapOverviewDb(roadmapId: string): Promise<RoadmapOverview> {
+  const def = requireRoadmapDefinition(roadmapId);
+  const progress = await loadAllProgress(def);
+  const activity = computeActivityFromProgress(def, progress);
   const firstRow = await getPrisma().roadmapDayProgress.findFirst({
-    where: { userId: DEMO_USER_ID, roadmapId: ROADMAP_ID },
+    where: { userId: DEMO_USER_ID, roadmapId: def.id },
     orderBy: { createdAt: "asc" },
   });
 
   return {
-    id: ROADMAP_ID,
-    title: ROADMAP_TITLE,
-    description: ROADMAP_DESCRIPTION,
-    totalDays: ROADMAP_DAYS.length,
+    id: def.id,
+    title: def.title,
+    description: def.description,
+    totalDays: def.days.length,
     startedAt: firstRow?.createdAt.toISOString() ?? null,
-    currentDay: getFirstIncompleteDay(progress),
-    days: ROADMAP_DAYS,
-    timeBlocks: TIME_BLOCKS,
+    currentDay: getFirstIncompleteDay(progress, def.days.length),
+    days: def.days,
+    timeBlocks: def.timeBlocks,
+    weekGoals: def.weekGoals,
+    accent: def.accent,
+    tags: def.tags,
     progress,
-    stats: computeRoadmapStats(progress),
-    streaks: computeRoadmapStreaks(progress, activity),
+    stats: computeRoadmapStats(def.days, progress, def.timeBlocks),
+    streaks: computeRoadmapStreaks(progress, activity, def.days.length),
     activityByDate: activity,
   };
 }
 
-export async function getDayProgressDb(dayNumber: number): Promise<RoadmapDayProgress | null> {
-  if (dayNumber < 1 || dayNumber > 30) return null;
+export async function getDayProgressDb(
+  roadmapId: string,
+  dayNumber: number,
+): Promise<RoadmapDayProgress | null> {
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
   const row = await getPrisma().roadmapDayProgress.findUnique({
     where: {
       userId_roadmapId_dayNumber: {
         userId: DEMO_USER_ID,
-        roadmapId: ROADMAP_ID,
+        roadmapId: def.id,
         dayNumber,
       },
     },
   });
-  return row ? rowToProgress(row) : createEmptyDayProgress(dayNumber);
+  return row
+    ? rowToProgress(row, def)
+    : createEmptyDayProgress(dayNumber, def.timeBlocks);
 }
 
-export async function startRoadmapDb(): Promise<RoadmapOverview> {
-  await ensureDayRow(1);
-  return getRoadmapOverviewDb();
+export async function startRoadmapDb(roadmapId: string): Promise<RoadmapOverview> {
+  const def = requireRoadmapDefinition(roadmapId);
+  await ensureDayRow(def, 1);
+  return getRoadmapOverviewDb(def.id);
 }
 
-export async function checkDayAccessDb(dayNumber: number) {
-  const progress = await loadAllProgress();
-  if (isDayUnlocked(dayNumber, progress)) {
+export async function checkDayAccessDb(roadmapId: string, dayNumber: number) {
+  const def = requireRoadmapDefinition(roadmapId);
+  const progress = await loadAllProgress(def);
+  if (isDayUnlocked(dayNumber, progress, def.days.length)) {
     return { allowed: true, message: null, requiredDay: null };
   }
   for (let d = 1; d < dayNumber; d++) {
@@ -147,7 +185,7 @@ export async function checkDayAccessDb(dayNumber: number) {
     if (!p?.dayCompleted) {
       return {
         allowed: false,
-        message: getDayLockMessage(dayNumber, progress),
+        message: getDayLockMessage(dayNumber, progress, def.days.length),
         requiredDay: d,
       };
     }
@@ -156,23 +194,77 @@ export async function checkDayAccessDb(dayNumber: number) {
 }
 
 export async function updateBlockStatusDb(
+  roadmapId: string,
   dayNumber: number,
   blockId: TimeBlockId,
   status: EntryStatus,
 ): Promise<RoadmapDayProgress | null> {
-  if (dayNumber < 1 || dayNumber > 30) return null;
-  const row = await ensureDayRow(dayNumber);
-  const blocks = { ...(row.blocks as Record<TimeBlockId, EntryStatus>), [blockId]: status };
-  const dayCompleted = syncDayCompleted(blocks);
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  const row = await ensureDayRow(def, dayNumber);
+  const day = def.days.find((d) => d.dayNumber === dayNumber);
+  const blocks = {
+    ...(row.blocks as Record<TimeBlockId, EntryStatus>),
+    [blockId]: status,
+  };
+  const taskStatuses = (row.taskStatuses ?? {}) as Record<string, EntryStatus>;
+  const provisional: RoadmapDayProgress = {
+    dayNumber,
+    blocks,
+    taskStatuses,
+    notes: row.notes ?? "",
+    builtItems: row.builtItems ?? "",
+    learnNotes: row.learnNotes ?? "",
+    dayCompleted: false,
+    completedAt: null,
+    updatedAt: new Date().toISOString(),
+  };
+  const dayCompleted = isDayFullyComplete(day, provisional, def.timeBlocks);
 
   const updated = await getPrisma().roadmapDayProgress.update({
     where: { id: row.id },
     data: { blocks, dayCompleted },
   });
-  return rowToProgress(updated);
+  return rowToProgress(updated, def);
+}
+
+export async function updateTaskStatusDb(
+  roadmapId: string,
+  dayNumber: number,
+  taskId: string,
+  status: EntryStatus,
+): Promise<RoadmapDayProgress | null> {
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  const row = await ensureDayRow(def, dayNumber);
+  const day = def.days.find((d) => d.dayNumber === dayNumber);
+  const blocks = (row.blocks as Record<TimeBlockId, EntryStatus>) ?? defaultBlocks(def);
+  const taskStatuses = {
+    ...((row.taskStatuses ?? {}) as Record<string, EntryStatus>),
+    [taskId]: status,
+  };
+  const provisional: RoadmapDayProgress = {
+    dayNumber,
+    blocks,
+    taskStatuses,
+    notes: row.notes ?? "",
+    builtItems: row.builtItems ?? "",
+    learnNotes: row.learnNotes ?? "",
+    dayCompleted: false,
+    completedAt: null,
+    updatedAt: new Date().toISOString(),
+  };
+  const dayCompleted = isDayFullyComplete(day, provisional, def.timeBlocks);
+
+  const updated = await getPrisma().roadmapDayProgress.update({
+    where: { id: row.id },
+    data: { taskStatuses, dayCompleted },
+  });
+  return rowToProgress(updated, def);
 }
 
 export async function updateDayNotesDb(
+  roadmapId: string,
   dayNumber: number,
   data: {
     notes?: string;
@@ -180,9 +272,23 @@ export async function updateDayNotesDb(
     learnNotes?: string;
   },
 ): Promise<RoadmapDayProgress | null> {
-  if (dayNumber < 1 || dayNumber > 30) return null;
-  const row = await ensureDayRow(dayNumber);
+  const def = getRoadmapDefinition(roadmapId);
+  if (!def || dayNumber < 1 || dayNumber > def.days.length) return null;
+  const row = await ensureDayRow(def, dayNumber);
+  const day = def.days.find((d) => d.dayNumber === dayNumber);
   const blocks = row.blocks as Record<TimeBlockId, EntryStatus>;
+  const taskStatuses = (row.taskStatuses ?? {}) as Record<string, EntryStatus>;
+  const provisional: RoadmapDayProgress = {
+    dayNumber,
+    blocks,
+    taskStatuses,
+    notes: data.notes ?? row.notes ?? "",
+    builtItems: data.builtItems ?? row.builtItems ?? "",
+    learnNotes: data.learnNotes ?? row.learnNotes ?? "",
+    dayCompleted: false,
+    completedAt: null,
+    updatedAt: new Date().toISOString(),
+  };
 
   const updated = await getPrisma().roadmapDayProgress.update({
     where: { id: row.id },
@@ -190,8 +296,8 @@ export async function updateDayNotesDb(
       notes: data.notes ?? row.notes,
       builtItems: data.builtItems ?? row.builtItems,
       learnNotes: data.learnNotes ?? row.learnNotes,
-      dayCompleted: syncDayCompleted(blocks),
+      dayCompleted: isDayFullyComplete(day, provisional, def.timeBlocks),
     },
   });
-  return rowToProgress(updated);
+  return rowToProgress(updated, def);
 }

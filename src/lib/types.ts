@@ -104,9 +104,10 @@ export interface DailyGoal {
   percentage: number;
 }
 
-// ---- NestJS 30-Day Roadmap ----
+// ---- Learning roadmaps / projects ----
 
 export type TimeBlockId = "learn" | "rebuild" | "build" | "test";
+export type RoadmapTrack = "backend" | "frontend" | "shared";
 
 export interface TimeBlockConfig {
   id: TimeBlockId;
@@ -114,6 +115,21 @@ export interface TimeBlockConfig {
   startTime: string;
   endTime: string;
   description: string;
+}
+
+/** Leaf checklist item inside a day project (e.g. "Register endpoint"). */
+export interface RoadmapChildTask {
+  id: string;
+  label: string;
+}
+
+/** Parent project on a day — backend and frontend stay separate. */
+export interface RoadmapProject {
+  id: string;
+  title: string;
+  track: RoadmapTrack;
+  description?: string;
+  tasks: RoadmapChildTask[];
 }
 
 export interface RoadmapDay {
@@ -124,6 +140,9 @@ export interface RoadmapDay {
   goal?: string;
   topics: string[];
   task: string;
+  /** Nested projects with child tasks (ticket API roadmap, etc.). */
+  projects?: RoadmapProject[];
+  checklist?: string[];
   isReviewDay?: boolean;
   isMiniProject?: boolean;
 }
@@ -131,6 +150,8 @@ export interface RoadmapDay {
 export interface RoadmapDayProgress {
   dayNumber: number;
   blocks: Record<TimeBlockId, EntryStatus>;
+  /** Child task completion keyed by RoadmapChildTask.id */
+  taskStatuses: Record<string, EntryStatus>;
   notes: string;
   builtItems: string;
   learnNotes: string;
@@ -154,12 +175,32 @@ export interface RoadmapOverview {
   days: RoadmapDay[];
   timeBlocks: TimeBlockConfig[];
   progress: RoadmapDayProgress[];
+  weekGoals?: Record<number, string>;
+  accent?: string;
+  tags?: string[];
   stats: {
     daysCompleted: number;
     blocksCompleted: number;
     totalBlocks: number;
+    tasksCompleted: number;
+    totalTasks: number;
     completionPercentage: number;
   };
   streaks: RoadmapStreaks;
   activityByDate: Record<string, number>;
+}
+
+/** Card shown on the projects index. */
+export interface RoadmapSummary {
+  id: string;
+  title: string;
+  description: string;
+  totalDays: number;
+  tags: string[];
+  accent: string;
+  hasProjects: boolean;
+  startedAt: string | null;
+  currentDay: number;
+  daysCompleted: number;
+  completionPercentage: number;
 }

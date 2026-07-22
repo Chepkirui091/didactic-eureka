@@ -1,40 +1,31 @@
-import type { RoadmapDay, TimeBlockConfig, RoadmapDayProgress, TimeBlockId, StreakInfo } from "./types";
+import type { RoadmapDay, TimeBlockConfig, RoadmapDayProgress } from "./types";
+import {
+  DEFAULT_TIME_BLOCKS,
+  createEmptyDayProgress as createEmptyDayProgressCore,
+  formatTimeRange as formatTimeRangeCore,
+  isDayUnlocked as isDayUnlockedCore,
+  getDayLockMessage as getDayLockMessageCore,
+  getFirstIncompleteDay as getFirstIncompleteDayCore,
+  computeRoadmapStats as computeRoadmapStatsCore,
+  computeDayCompletionStreak as computeDayCompletionStreakCore,
+  computeStudyStreak as computeStudyStreakCore,
+  computeRoadmapStreaks as computeRoadmapStreaksCore,
+  getRoadmapActivityByDate as getRoadmapActivityByDateCore,
+  type RoadmapDefinition,
+} from "./roadmap-core";
 
 export const ROADMAP_ID = "nestjs-30-day";
 export const ROADMAP_TITLE = "30-Day NestJS Roadmap";
 export const ROADMAP_DESCRIPTION =
   "Build a full marketplace backend with NestJS, Prisma, PostgreSQL, auth, bookings, and real-world features.";
 
-export const TIME_BLOCKS: TimeBlockConfig[] = [
-  {
-    id: "learn",
-    label: "Learn",
-    startTime: "05:30",
-    endTime: "07:30",
-    description: "Watch or read NestJS concepts (1–2 hours)",
-  },
-  {
-    id: "rebuild",
-    label: "Rebuild",
-    startTime: "09:30",
-    endTime: "10:00",
-    description: "Rebuild yesterday's feature from memory",
-  },
-  {
-    id: "build",
-    label: "Build",
-    startTime: "19:30",
-    endTime: "21:30",
-    description: "Implement today's feature immediately (2 hours)",
-  },
-  {
-    id: "test",
-    label: "Test",
-    startTime: "21:30",
-    endTime: "22:00",
-    description: "Break your API intentionally and fix it",
-  },
-];
+export const TIME_BLOCKS: TimeBlockConfig[] = DEFAULT_TIME_BLOCKS.map((b) =>
+  b.id === "learn"
+    ? { ...b, description: "Watch or read NestJS concepts (1–2 hours)" }
+    : b.id === "test"
+      ? { ...b, description: "Break your API intentionally and fix it" }
+      : b,
+);
 
 export const WEEK_GOALS: Record<number, string> = {
   1: "Understand NestJS structure and build simple CRUD APIs.",
@@ -379,184 +370,70 @@ export const ROADMAP_DAYS: RoadmapDay[] = [
   },
 ];
 
+export const NESTJS_ROADMAP: RoadmapDefinition = {
+  id: ROADMAP_ID,
+  title: ROADMAP_TITLE,
+  description: ROADMAP_DESCRIPTION,
+  tags: ["NestJS", "Marketplace", "30 days"],
+  accent: "160 84% 39%",
+  timeBlocks: TIME_BLOCKS,
+  weekGoals: WEEK_GOALS,
+  days: ROADMAP_DAYS,
+};
+
 export function createEmptyDayProgress(dayNumber: number): RoadmapDayProgress {
-  const blocks = {} as Record<TimeBlockId, "pending">;
-  for (const block of TIME_BLOCKS) {
-    blocks[block.id] = "pending";
-  }
-  return {
-    dayNumber,
-    blocks,
-    notes: "",
-    builtItems: "",
-    learnNotes: "",
-    dayCompleted: false,
-    completedAt: null,
-    updatedAt: new Date().toISOString(),
-  };
+  return createEmptyDayProgressCore(dayNumber, TIME_BLOCKS);
 }
 
 export function formatTimeRange(start: string, end: string): string {
-  const fmt = (t: string) => {
-    const [h, m] = t.split(":").map(Number);
-    const period = h >= 12 ? "PM" : "AM";
-    const hour = h % 12 || 12;
-    return `${hour}:${m.toString().padStart(2, "0")} ${period}`;
-  };
-  return `${fmt(start)} – ${fmt(end)}`;
+  return formatTimeRangeCore(start, end);
 }
 
 export function getDayByNumber(dayNumber: number): RoadmapDay | undefined {
   return ROADMAP_DAYS.find((d) => d.dayNumber === dayNumber);
 }
 
-/** Day N unlocks only after days 1..N-1 are fully completed (all 4 blocks). */
+/** Day N unlocks only after days 1..N-1 are fully completed. */
 export function isDayUnlocked(
   dayNumber: number,
   progress: RoadmapDayProgress[],
 ): boolean {
-  if (dayNumber < 1 || dayNumber > ROADMAP_DAYS.length) return false;
-  if (dayNumber === 1) return true;
-  for (let d = 1; d < dayNumber; d++) {
-    const p = progress.find((x) => x.dayNumber === d);
-    if (!p?.dayCompleted) return false;
-  }
-  return true;
+  return isDayUnlockedCore(dayNumber, progress, ROADMAP_DAYS.length);
 }
 
 export function getDayLockMessage(
   dayNumber: number,
   progress: RoadmapDayProgress[],
 ): string | null {
-  if (isDayUnlocked(dayNumber, progress)) return null;
-  for (let d = 1; d < dayNumber; d++) {
-    const p = progress.find((x) => x.dayNumber === d);
-    if (!p?.dayCompleted) {
-      return `Complete Day ${d} first — mark all 4 blocks (Learn, Rebuild, Build, Test) as done.`;
-    }
-  }
-  return "This day is locked.";
+  return getDayLockMessageCore(dayNumber, progress, ROADMAP_DAYS.length);
 }
 
 export function getFirstIncompleteDay(progress: RoadmapDayProgress[]): number {
-  const first = progress.find((p) => !p.dayCompleted);
-  return first?.dayNumber ?? ROADMAP_DAYS.length;
+  return getFirstIncompleteDayCore(progress, ROADMAP_DAYS.length);
 }
 
 export function computeRoadmapStats(progress: RoadmapDayProgress[]) {
-  const daysCompleted = progress.filter((p) => p.dayCompleted).length;
-  let blocksCompleted = 0;
-  const totalBlocks = ROADMAP_DAYS.length * TIME_BLOCKS.length;
-  for (const p of progress) {
-    for (const block of TIME_BLOCKS) {
-      if (p.blocks[block.id] === "completed") blocksCompleted += 1;
-    }
-  }
-  return {
-    daysCompleted,
-    blocksCompleted,
-    totalBlocks,
-    completionPercentage: totalBlocks
-      ? Math.round((blocksCompleted / totalBlocks) * 100)
-      : 0,
-  };
+  return computeRoadmapStatsCore(ROADMAP_DAYS, progress, TIME_BLOCKS);
 }
 
-function roadmapToday(): string {
-  return new Date().toISOString().slice(0, 10);
+export function computeDayCompletionStreak(progress: RoadmapDayProgress[]) {
+  return computeDayCompletionStreakCore(progress, ROADMAP_DAYS.length);
 }
 
-function roadmapDateOffset(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Consecutive roadmap days fully completed from Day 1. */
-export function computeDayCompletionStreak(progress: RoadmapDayProgress[]): StreakInfo {
-  let current = 0;
-  for (let d = 1; d <= ROADMAP_DAYS.length; d++) {
-    const p = progress.find((x) => x.dayNumber === d);
-    if (p?.dayCompleted) current++;
-    else break;
-  }
-  let longest = 0;
-  let run = 0;
-  for (let d = 1; d <= ROADMAP_DAYS.length; d++) {
-    const p = progress.find((x) => x.dayNumber === d);
-    if (p?.dayCompleted) {
-      run++;
-      longest = Math.max(longest, run);
-    } else {
-      run = 0;
-    }
-  }
-  return { current, longest };
-}
-
-/** Consecutive calendar days with at least one block completed. */
-export function computeStudyStreak(activityByDate: Record<string, number>): StreakInfo {
-  const today = roadmapToday();
-  const yesterday = roadmapDateOffset(-1);
-  const dates = Object.entries(activityByDate)
-    .filter(([, count]) => count > 0)
-    .map(([date]) => date)
-    .sort((a, b) => a.localeCompare(b));
-
-  if (dates.length === 0) return { current: 0, longest: 0 };
-
-  let longest = 0;
-  let run = 0;
-  for (let i = 0; i < dates.length; i++) {
-    if (i === 0) {
-      run = 1;
-    } else {
-      const prev = new Date(dates[i - 1]).getTime();
-      const curr = new Date(dates[i]).getTime();
-      const diffDays = (curr - prev) / (1000 * 60 * 60 * 24);
-      run = diffDays === 1 ? run + 1 : 1;
-    }
-    longest = Math.max(longest, run);
-  }
-
-  const latest = dates[dates.length - 1];
-  let current = 0;
-  if (latest === today || latest === yesterday) {
-    current = 1;
-    for (let i = dates.length - 2; i >= 0; i--) {
-      const prev = new Date(dates[i]).getTime();
-      const next = new Date(dates[i + 1]).getTime();
-      const diffDays = (next - prev) / (1000 * 60 * 60 * 24);
-      if (diffDays === 1) current++;
-      else break;
-    }
-  }
-
-  return { current, longest };
+export function computeStudyStreak(activityByDate: Record<string, number>) {
+  return computeStudyStreakCore(activityByDate);
 }
 
 export function getRoadmapActivityByDate(
   activityByDate: Record<string, number>,
   daysBack: number,
-): Record<string, number> {
-  const today = roadmapToday();
-  const out: Record<string, number> = {};
-  const end = new Date(today);
-  for (let i = 0; i <= daysBack; i++) {
-    const d = new Date(end);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    out[dateStr] = activityByDate[dateStr] ?? 0;
-  }
-  return out;
+) {
+  return getRoadmapActivityByDateCore(activityByDate, daysBack);
 }
 
 export function computeRoadmapStreaks(
   progress: RoadmapDayProgress[],
   activityByDate: Record<string, number>,
 ) {
-  return {
-    days: computeDayCompletionStreak(progress),
-    study: computeStudyStreak(activityByDate),
-  };
+  return computeRoadmapStreaksCore(progress, activityByDate, ROADMAP_DAYS.length);
 }

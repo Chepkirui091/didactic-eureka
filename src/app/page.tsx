@@ -92,7 +92,7 @@ export default function DashboardPage() {
 
   const scheduledIds = useMemo(() => schedule.map((h) => h.id), [schedule]);
   const { entries: todaysEntries, setStatus } = useTodayEntries(scheduledIds);
-  const { roadmap } = useRoadmap();
+  const { roadmap } = useRoadmap("nestjs-ticket-7-day");
   const goal = useMemo(() => {
     const total = habitsForToday.filter((h) => {
       const s = h.schedule as { frequency: string; daysOfWeek?: number[] };
@@ -230,7 +230,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* NestJS roadmap today */}
+      {/* Active learning project */}
       {roadmap && (
         <section
           className="rounded-xl border p-5"
@@ -239,10 +239,10 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold flex items-center gap-2">
               <Compass className="w-5 h-5" style={{ color: "hsl(var(--accent))" }} />
-              NestJS Roadmap - Day {roadmap.currentDay}
+              {roadmap.title} — Day {roadmap.currentDay}
             </h2>
             <Link
-              href={`/roadmap/${roadmap.currentDay}`}
+              href={`/roadmap/${roadmap.id}/${roadmap.currentDay}`}
               className="text-sm font-medium flex items-center gap-1 hover:underline"
               style={{ color: "hsl(var(--accent))" }}
             >
@@ -253,9 +253,17 @@ export default function DashboardPage() {
             const day = roadmap.days.find((d) => d.dayNumber === roadmap.currentDay);
             const prog = roadmap.progress.find((p) => p.dayNumber === roadmap.currentDay);
             if (!day || !prog) return null;
+            const taskIds =
+              day.projects?.flatMap((p) => p.tasks.map((t) => t.id)) ?? [];
+            const hasTasks = taskIds.length > 0;
+            const tasksDone = taskIds.filter(
+              (id) => prog.taskStatuses?.[id] === "completed",
+            ).length;
             const blocksDone = roadmap.timeBlocks.filter(
               (b) => prog.blocks[b.id] === "completed",
             ).length;
+            const done = hasTasks ? tasksDone : blocksDone;
+            const total = hasTasks ? taskIds.length : roadmap.timeBlocks.length;
             return (
               <>
                 <p className="text-sm font-medium">{day.title}</p>
@@ -265,13 +273,13 @@ export default function DashboardPage() {
                     <div
                       className="h-full rounded-full"
                       style={{
-                        width: `${(blocksDone / roadmap.timeBlocks.length) * 100}%`,
+                        width: `${total ? (done / total) * 100 : 0}%`,
                         background: "hsl(var(--accent))",
                       }}
                     />
                   </div>
                   <span className="text-xs text-[var(--muted)] shrink-0">
-                    {blocksDone}/{roadmap.timeBlocks.length} blocks
+                    {done}/{total} {hasTasks ? "tasks" : "blocks"}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 mt-2">
@@ -281,16 +289,13 @@ export default function DashboardPage() {
                       {roadmap.streaks.study.current} day study streak
                     </span>
                   )}
-                  {roadmap.streaks.days.current > 0 && (
-                    <span className="text-xs text-[var(--muted)]">
-                      {roadmap.streaks.days.current} roadmap day
-                      {roadmap.streaks.days.current === 1 ? "" : "s"} in a row
-                    </span>
-                  )}
+                  <Link
+                    href="/roadmap"
+                    className="text-xs text-[var(--muted)] hover:underline ml-auto"
+                  >
+                    All projects
+                  </Link>
                 </div>
-                <p className="text-xs text-[var(--muted)] mt-2">
-                  Learn 5:30–7:30 · Rebuild 9:30–10 · Build 7:30–9:30 · Test 9:30–10
-                </p>
               </>
             );
           })()}

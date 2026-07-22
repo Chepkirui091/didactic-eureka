@@ -4,6 +4,7 @@ import type {
   HabitEntry,
   RoadmapDayProgress,
   RoadmapOverview,
+  RoadmapSummary,
   TimeBlockId,
 } from "./types";
 import { isFallbackResponse, readApiError } from "./api-response";
@@ -19,11 +20,11 @@ import {
 } from "./client-cache";
 import { dummyHabits, getTodaysEntries } from "./dummy-data";
 import {
-  TIME_BLOCKS,
   computeRoadmapStats,
   computeRoadmapStreaks,
   getFirstIncompleteDay,
-} from "./nestjs-roadmap-data";
+  isDayFullyComplete,
+} from "./roadmap-core";
 
 function sourceFromResponse(res: Response): CacheSource {
   return isFallbackResponse(res) ? "fallback" : "database";
@@ -197,15 +198,40 @@ export async function getActivityByDate(
   }
 }
 
-export async function getRoadmap(force = false): Promise<RoadmapOverview> {
-  const key = CacheKeys.roadmap;
+export async function listRoadmaps(force = false): Promise<RoadmapSummary[]> {
+  const key = CacheKeys.roadmaps;
+  if (!force) {
+    const cached = readCached<RoadmapSummary[]>(key);
+    if (cached) return cached;
+  }
+
+  try {
+    const { data, res } = await fetchJson<RoadmapSummary[]>("/api/roadmap");
+    if (!isFallbackResponse(res)) {
+      writeDbCache(key, data);
+    } else {
+      writeCache(key, data, "fallback");
+    }
+    return data;
+  } catch {
+    const stale = readCached<RoadmapSummary[]>(key);
+    if (stale) return stale;
+    throw new Error("Could not load projects");
+  }
+}
+
+export async function getRoadmap(
+  roadmapId: string,
+  force = false,
+): Promise<RoadmapOverview> {
+  const key = CacheKeys.roadmapId(roadmapId);
   if (!force) {
     const cached = readCached<RoadmapOverview>(key);
     if (cached) return cached;
   }
 
   try {
-    const { data, res } = await fetchJson<RoadmapOverview>("/api/roadmap");
+    const { data, res } = await fetchJson<RoadmapOverview>(`/api/roadmap/${roadmapId}`);
     if (!isFallbackResponse(res)) {
       writeDbCache(key, data);
     } else {
@@ -219,6 +245,16 @@ export async function getRoadmap(force = false): Promise<RoadmapOverview> {
   }
 }
 
+function recomputeOverview(overview: RoadmapOverview, progress: RoadmapDayProgress[]): RoadmapOverview {
+  return {
+    ...overview,
+    progress,
+    currentDay: getFirstIncompleteDay(progress, overview.totalDays),
+    stats: computeRoadmapStats(overview.days, progress, overview.timeBlocks),
+    streaks: computeRoadmapStreaks(progress, overview.activityByDate, overview.totalDays),
+  };
+}
+
 /** Optimistic UI only — cache is updated after a successful DB mutation. */
 export function applyRoadmapBlockUpdate(
   overview: RoadmapOverview,
@@ -228,31 +264,55 @@ export function applyRoadmapBlockUpdate(
 ): { overview: RoadmapOverview; dayJustCompleted: boolean } {
   const today = new Date().toISOString().slice(0, 10);
   let dayJustCompleted = false;
+  const day = overview.days.find((d) => d.dayNumber === dayNumber);
 
   const progress = overview.progress.map((p) => {
     if (p.dayNumber !== dayNumber) return p;
     const beforeDone = p.dayCompleted;
-    const blocks = { ...p.blocks, [blockId]: status };
-    const dayCompleted = TIME_BLOCKS.every((b) => blocks[b.id] === "completed");
-    if (dayCompleted && !beforeDone) dayJustCompleted = true;
-    return {
+    const next: RoadmapDayProgress = {
       ...p,
-      blocks,
-      dayCompleted,
-      completedAt: dayCompleted ? today : null,
+      blocks: { ...p.blocks, [blockId]: status },
+      taskStatuses: p.taskStatuses ?? {},
       updatedAt: new Date().toISOString(),
+      dayCompleted: false,
+      completedAt: null,
     };
+    next.dayCompleted = isDayFullyComplete(day, next, overview.timeBlocks);
+    next.completedAt = next.dayCompleted ? today : null;
+    if (next.dayCompleted && !beforeDone) dayJustCompleted = true;
+    return next;
   });
 
-  const next: RoadmapOverview = {
-    ...overview,
-    progress,
-    currentDay: getFirstIncompleteDay(progress),
-    stats: computeRoadmapStats(progress),
-    streaks: computeRoadmapStreaks(progress, overview.activityByDate),
-  };
+  return { overview: recomputeOverview(overview, progress), dayJustCompleted };
+}
 
-  return { overview: next, dayJustCompleted };
+export function applyRoadmapTaskUpdate(
+  overview: RoadmapOverview,
+  dayNumber: number,
+  taskId: string,
+  status: EntryStatus,
+): { overview: RoadmapOverview; dayJustCompleted: boolean } {
+  const today = new Date().toISOString().slice(0, 10);
+  let dayJustCompleted = false;
+  const day = overview.days.find((d) => d.dayNumber === dayNumber);
+
+  const progress = overview.progress.map((p) => {
+    if (p.dayNumber !== dayNumber) return p;
+    const beforeDone = p.dayCompleted;
+    const next: RoadmapDayProgress = {
+      ...p,
+      taskStatuses: { ...(p.taskStatuses ?? {}), [taskId]: status },
+      updatedAt: new Date().toISOString(),
+      dayCompleted: false,
+      completedAt: null,
+    };
+    next.dayCompleted = isDayFullyComplete(day, next, overview.timeBlocks);
+    next.completedAt = next.dayCompleted ? today : null;
+    if (next.dayCompleted && !beforeDone) dayJustCompleted = true;
+    return next;
+  });
+
+  return { overview: recomputeOverview(overview, progress), dayJustCompleted };
 }
 
 export function applyRoadmapDayNotes(
@@ -287,7 +347,7 @@ export function patchTodayEntry(habitId: string, entry: HabitEntry): void {
 }
 
 export function cacheRoadmapOverview(overview: RoadmapOverview): void {
-  writeDbCache(CacheKeys.roadmap, overview);
+  writeDbCache(CacheKeys.roadmapId(overview.id), overview);
 }
 
 export { invalidateHabitRelatedCaches, invalidateRoadmapCache };
@@ -297,9 +357,11 @@ export async function refetchHabitsAfterMutation(): Promise<Habit[]> {
   return getHabits(true);
 }
 
-export async function refetchRoadmapAfterMutation(): Promise<RoadmapOverview> {
-  invalidateRoadmapCache();
-  return getRoadmap(true);
+export async function refetchRoadmapAfterMutation(
+  roadmapId: string,
+): Promise<RoadmapOverview> {
+  invalidateRoadmapCache(roadmapId);
+  return getRoadmap(roadmapId, true);
 }
 
 export async function refetchEntriesTodayAfterMutation(): Promise<HabitEntry[]> {
