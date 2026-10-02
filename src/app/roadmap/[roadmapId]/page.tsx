@@ -51,6 +51,8 @@ export default function RoadmapOverviewPage() {
   }
 
   const accent = roadmap.accent ?? "160 84% 39%";
+  const item = roadmap.itemLabel ?? "Day";
+  const group = roadmap.groupLabel ?? "Week";
   const currentDayData = roadmap.days.find((d) => d.dayNumber === roadmap.currentDay);
   const currentProgress = roadmap.progress.find((p) => p.dayNumber === roadmap.currentDay);
   const weeks = [...new Set(roadmap.days.map((d) => d.week))].sort((a, b) => a - b);
@@ -94,7 +96,7 @@ export default function RoadmapOverviewPage() {
               className="px-4 py-2 rounded-lg text-sm font-medium text-white shrink-0 hover:opacity-90"
               style={{ background: `hsl(${accent})` }}
             >
-              Start Day 1
+              Start {item} 1
             </button>
           )}
         </div>
@@ -102,13 +104,13 @@ export default function RoadmapOverviewPage() {
 
       <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
-          { label: "Current day", value: `Day ${roadmap.currentDay}` },
+          { label: `Current ${item.toLowerCase()}`, value: `${item} ${roadmap.currentDay}` },
           {
-            label: "Days done",
+            label: `${item}s done`,
             value: `${roadmap.stats.daysCompleted}/${roadmap.totalDays}`,
           },
           {
-            label: "Day streak",
+            label: `${item} streak`,
             value: String(roadmap.streaks.days.current),
             sub: `Best: ${roadmap.streaks.days.longest}`,
             flame: true,
@@ -187,14 +189,14 @@ export default function RoadmapOverviewPage() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-lg flex items-center gap-2">
               <Target className="w-5 h-5" style={{ color: `hsl(${accent})` }} />
-              Today — Day {roadmap.currentDay}: {currentDayData.title}
+              Current — {item} {roadmap.currentDay}: {currentDayData.title}
             </h2>
             <Link
               href={`/roadmap/${roadmap.id}/${roadmap.currentDay}`}
               className="text-sm font-medium flex items-center gap-1 hover:underline"
               style={{ color: `hsl(${accent})` }}
             >
-              Open day <ChevronRight className="w-4 h-4" />
+              Open {item.toLowerCase()} <ChevronRight className="w-4 h-4" />
             </Link>
           </div>
           {currentDayData.goal && (
@@ -261,7 +263,7 @@ export default function RoadmapOverviewPage() {
         return (
           <section key={week}>
             <div className="mb-3">
-              <h2 className="font-semibold text-lg">Week {week}</h2>
+              <h2 className="font-semibold text-lg">{group} {week}</h2>
               {weekGoal && <p className="text-sm text-[var(--muted)]">{weekGoal}</p>}
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -290,7 +292,7 @@ export default function RoadmapOverviewPage() {
                   <>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-xs text-[var(--muted)]">Day {day.dayNumber}</p>
+                        <p className="text-xs text-[var(--muted)]">{item} {day.dayNumber}</p>
                         <p className="font-medium truncate">{day.title}</p>
                       </div>
                       {!unlocked ? (
@@ -381,30 +383,31 @@ export default function RoadmapOverviewPage() {
           What you&apos;ll ship
         </h2>
         <ul className="grid sm:grid-cols-2 gap-2 text-sm text-[var(--muted)]">
-          {(hasNestedProjects
-            ? [
-                "JWT auth + role-based NestJS API",
-                "Ticket CRUD, comments, and workflow",
-                "Search, filters, pagination, dashboard",
-                "Notifications + global error handling",
-                "Separate frontend for the same flows",
-                "Tests, Swagger, and production deploy",
-              ]
-            : [
-                "Build full backend APIs with NestJS",
-                "Design database schemas with Prisma",
-                "Build booking logic (the hard part)",
-                "Handle authentication + roles",
-                "Connect to a Next.js frontend",
-                "Build a real SaaS MVP",
-              ]
-          ).map((item) => (
-            <li key={item} className="flex items-center gap-2">
+          {(roadmap.outcomes ??
+            (hasNestedProjects
+              ? [
+                  "JWT auth + role-based NestJS API",
+                  "Ticket CRUD, comments, and workflow",
+                  "Search, filters, pagination, dashboard",
+                  "Notifications + global error handling",
+                  "Separate frontend for the same flows",
+                  "Tests, Swagger, and production deploy",
+                ]
+              : [
+                  "Build full backend APIs with NestJS",
+                  "Design database schemas with Prisma",
+                  "Build booking logic (the hard part)",
+                  "Handle authentication + roles",
+                  "Connect to a Next.js frontend",
+                  "Build a real SaaS MVP",
+                ])
+          ).map((outcome) => (
+            <li key={outcome} className="flex items-center gap-2">
               <CheckCircle2
                 className="w-4 h-4 shrink-0"
                 style={{ color: `hsl(${accent})` }}
               />
-              {item}
+              {outcome}
             </li>
           ))}
         </ul>

@@ -141,6 +141,9 @@ export async function getRoadmapOverviewDb(roadmapId: string): Promise<RoadmapOv
     weekGoals: def.weekGoals,
     accent: def.accent,
     tags: def.tags,
+    itemLabel: def.itemLabel ?? "Day",
+    groupLabel: def.groupLabel ?? "Week",
+    outcomes: def.outcomes,
     progress,
     stats: computeRoadmapStats(def.days, progress, def.timeBlocks),
     streaks: computeRoadmapStreaks(progress, activity, def.days.length),
@@ -185,12 +188,21 @@ export async function checkDayAccessDb(roadmapId: string, dayNumber: number) {
     if (!p?.dayCompleted) {
       return {
         allowed: false,
-        message: getDayLockMessage(dayNumber, progress, def.days.length),
+        message: getDayLockMessage(
+          dayNumber,
+          progress,
+          def.days.length,
+          def.itemLabel ?? "Day",
+        ),
         requiredDay: d,
       };
     }
   }
-  return { allowed: false, message: "This day is locked.", requiredDay: dayNumber - 1 };
+  return {
+    allowed: false,
+    message: `This ${(def.itemLabel ?? "Day").toLowerCase()} is locked.`,
+    requiredDay: dayNumber - 1,
+  };
 }
 
 export async function updateBlockStatusDb(

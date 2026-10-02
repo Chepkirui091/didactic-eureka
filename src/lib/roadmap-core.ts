@@ -49,6 +49,11 @@ export interface RoadmapDefinition {
   timeBlocks: TimeBlockConfig[];
   weekGoals: Record<number, string>;
   days: RoadmapDay[];
+  /** Defaults to "Day" when omitted. */
+  itemLabel?: string;
+  /** Defaults to "Week" when omitted. */
+  groupLabel?: string;
+  outcomes?: string[];
 }
 
 export function countDayTasks(day: RoadmapDay): number {
@@ -112,15 +117,17 @@ export function getDayLockMessage(
   dayNumber: number,
   progress: RoadmapDayProgress[],
   totalDays: number,
+  unit = "Day",
 ): string | null {
   if (isDayUnlocked(dayNumber, progress, totalDays)) return null;
+  const label = unit.toLowerCase();
   for (let d = 1; d < dayNumber; d++) {
     const p = progress.find((x) => x.dayNumber === d);
     if (!p?.dayCompleted) {
-      return `Complete Day ${d} first before unlocking this day.`;
+      return `Complete ${unit} ${d} first before unlocking this ${label}.`;
     }
   }
-  return "This day is locked.";
+  return `This ${label} is locked.`;
 }
 
 export function getFirstIncompleteDay(
@@ -299,6 +306,7 @@ export function definitionToSummary(
     tags: def.tags,
     accent: def.accent,
     hasProjects: def.days.some((d) => (d.projects?.length ?? 0) > 0),
+    itemLabel: def.itemLabel ?? "Day",
     startedAt: overview?.startedAt ?? null,
     currentDay: overview?.currentDay ?? 1,
     daysCompleted: overview?.stats.daysCompleted ?? 0,

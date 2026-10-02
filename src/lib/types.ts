@@ -178,6 +178,11 @@ export interface RoadmapOverview {
   weekGoals?: Record<number, string>;
   accent?: string;
   tags?: string[];
+  /** Sequential unit label. Defaults to "Day" for existing roadmaps. */
+  itemLabel?: string;
+  /** Group label. Defaults to "Week" for existing roadmaps. */
+  groupLabel?: string;
+  outcomes?: string[];
   stats: {
     daysCompleted: number;
     blocksCompleted: number;
@@ -199,6 +204,7 @@ export interface RoadmapSummary {
   tags: string[];
   accent: string;
   hasProjects: boolean;
+  itemLabel: string;
   startedAt: string | null;
   currentDay: number;
   daysCompleted: number;

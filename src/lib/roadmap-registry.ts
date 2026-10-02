@@ -1,10 +1,12 @@
 import { NESTJS_ROADMAP } from "./nestjs-roadmap-data";
 import { TICKET_ROADMAP } from "./ticket-roadmap-data";
+import { YEAR_ROADMAP } from "./year-roadmap-data";
 import type { RoadmapDefinition } from "./roadmap-core";
 
 export const ROADMAP_DEFINITIONS: RoadmapDefinition[] = [
   TICKET_ROADMAP,
   NESTJS_ROADMAP,
+  YEAR_ROADMAP,
 ];
 
 export function getRoadmapDefinition(id: string): RoadmapDefinition | undefined {

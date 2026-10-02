@@ -95,7 +95,12 @@ export function checkDayAccess(
       if (!p?.dayCompleted) {
         return {
           allowed: false,
-          message: getDayLockMessage(dayNumber, progress, def.days.length),
+          message: getDayLockMessage(
+            dayNumber,
+            progress,
+            def.days.length,
+            def.itemLabel ?? "Day",
+          ),
           requiredDay: d,
         };
       }
@@ -121,6 +126,9 @@ export function getRoadmapOverview(roadmapId: string): RoadmapOverview {
     weekGoals: def.weekGoals,
     accent: def.accent,
     tags: def.tags,
+    itemLabel: def.itemLabel ?? "Day",
+    groupLabel: def.groupLabel ?? "Week",
+    outcomes: def.outcomes,
     progress,
     stats: computeRoadmapStats(def.days, progress, def.timeBlocks),
     streaks: computeRoadmapStreaks(progress, activity, def.days.length),

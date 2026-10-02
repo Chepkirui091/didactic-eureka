@@ -87,7 +87,7 @@ export default function ProjectsIndexPage() {
                   }}
                 >
                   {started
-                    ? `Day ${project.currentDay} · ${project.completionPercentage}%`
+                    ? `${project.itemLabel} ${project.currentDay} · ${project.completionPercentage}%`
                     : "Not started"}
                 </span>
               </div>
@@ -129,7 +129,8 @@ export default function ProjectsIndexPage() {
                 style={{ borderColor: "var(--border)" }}
               >
                 <span className="text-sm text-[var(--muted)]">
-                  {project.daysCompleted}/{project.totalDays} days done
+                  {project.daysCompleted}/{project.totalDays}{" "}
+                  {project.itemLabel.toLowerCase()}s done
                 </span>
                 <span
                   className="inline-flex items-center gap-1 text-sm font-medium"

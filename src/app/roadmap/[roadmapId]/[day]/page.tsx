@@ -26,6 +26,8 @@ export default function RoadmapDayPage() {
   const roadmapId = String(params.roadmapId ?? "");
   const dayNumber = Number.parseInt(String(params.day), 10);
   const def = getRoadmapDefinition(roadmapId);
+  const item = def?.itemLabel ?? "Day";
+  const itemLower = item.toLowerCase();
   const { roadmap, loading, updateBlock, updateTask, saveDayNotes, checkDayAccess } =
     useRoadmap(roadmapId);
 
@@ -64,11 +66,11 @@ export default function RoadmapDayPage() {
   };
 
   if (!def || Number.isNaN(dayNumber) || dayNumber < 1 || dayNumber > def.days.length) {
-    return <p className="text-[var(--muted)]">Invalid day.</p>;
+    return <p className="text-[var(--muted)]">Invalid {itemLower}.</p>;
   }
 
   if (loading) {
-    return <p className="text-[var(--muted)]">Loading day {dayNumber}…</p>;
+    return <p className="text-[var(--muted)]">Loading {itemLower} {dayNumber}…</p>;
   }
 
   if (!access.allowed) {
@@ -91,7 +93,7 @@ export default function RoadmapDayPage() {
           >
             <Lock className="w-7 h-7" style={{ color: `hsl(${accent})` }} />
           </div>
-          <h1 className="text-xl font-bold">Day {dayNumber} is locked</h1>
+          <h1 className="text-xl font-bold">{item} {dayNumber} is locked</h1>
           <p className="text-[var(--muted)] mt-2 text-sm">{access.message}</p>
           {access.requiredDay && (
             <Link
@@ -99,7 +101,7 @@ export default function RoadmapDayPage() {
               className="inline-block mt-6 px-4 py-2 rounded-lg text-sm font-medium text-white hover:opacity-90"
               style={{ background: `hsl(${accent})` }}
             >
-              Go to Day {access.requiredDay}
+              Go to {item} {access.requiredDay}
             </Link>
           )}
         </div>
@@ -108,7 +110,7 @@ export default function RoadmapDayPage() {
   }
 
   if (!day || !progress || !roadmap) {
-    return <p className="text-[var(--muted)]">Day not found.</p>;
+    return <p className="text-[var(--muted)]">{item} not found.</p>;
   }
 
   const taskIds = listDayTaskIds(day);
@@ -143,26 +145,26 @@ export default function RoadmapDayPage() {
               {weekGoal ? ` · ${weekGoal}` : ""}
             </p>
             <h1 className="text-2xl font-bold mt-1">
-              Day {day.dayNumber}: {day.title}
+              {item} {day.dayNumber}: {day.title}
             </h1>
             {day.goal && (
               <p className="text-sm text-[var(--muted)] mt-2 max-w-2xl">{day.goal}</p>
             )}
             {day.isMiniProject && (
               <span className="inline-block mt-2 text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                Mini project day
+                Mini project {itemLower}
               </span>
             )}
             {day.isReviewDay && (
               <span className="inline-block mt-2 ml-2 text-xs px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-400">
-                Review day
+                Review {itemLower}
               </span>
             )}
           </div>
           {progress.dayCompleted && (
             <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400 shrink-0">
               <CheckCircle2 className="w-5 h-5" />
-              Day complete
+              {item} complete
             </span>
           )}
         </div>
@@ -189,8 +191,8 @@ export default function RoadmapDayPage() {
               </span>
               <span className="flex items-center gap-1.5 text-sm text-[var(--muted)]">
                 <Flame className="w-4 h-4 text-amber-600/60 dark:text-amber-400/60" />
-                {streaks.days.current} day{streaks.days.current === 1 ? "" : "s"} finished in a
-                row
+                {streaks.days.current} {itemLower}
+                {streaks.days.current === 1 ? "" : "s"} finished in a row
               </span>
             </>
           )}
@@ -347,7 +349,7 @@ export default function RoadmapDayPage() {
             className="text-sm font-medium hover:underline"
             style={{ color: `hsl(${accent})` }}
           >
-            ← Day {prevDay}
+            ← {item} {prevDay}
           </Link>
         ) : (
           <span />
@@ -358,12 +360,12 @@ export default function RoadmapDayPage() {
             className="text-sm font-medium hover:underline"
             style={{ color: `hsl(${accent})` }}
           >
-            Day {nextDay} →
+            {item} {nextDay} →
           </Link>
         ) : nextDay ? (
           <span className="text-sm text-[var(--muted)] flex items-center gap-1">
             <Lock className="w-3.5 h-3.5" />
-            Finish this day to unlock Day {nextDay}
+            Finish this {itemLower} to unlock {item} {nextDay}
           </span>
         ) : (
           <span className="text-sm text-[var(--muted)]">Project complete 🎉</span>

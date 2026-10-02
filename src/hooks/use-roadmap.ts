@@ -183,12 +183,21 @@ export function useRoadmap(roadmapId: string) {
         if (!p?.dayCompleted) {
           return {
             allowed: false,
-            message: getDayLockMessage(dayNumber, roadmap.progress, roadmap.totalDays),
+            message: getDayLockMessage(
+              dayNumber,
+              roadmap.progress,
+              roadmap.totalDays,
+              roadmap.itemLabel ?? "Day",
+            ),
             requiredDay: d,
           };
         }
       }
-      return { allowed: false, message: "This day is locked.", requiredDay: dayNumber - 1 };
+      return {
+        allowed: false,
+        message: `This ${(roadmap.itemLabel ?? "Day").toLowerCase()} is locked.`,
+        requiredDay: dayNumber - 1,
+      };
     },
     [roadmap],
   );
