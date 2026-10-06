@@ -87,7 +87,7 @@ export default function ProjectsIndexPage() {
                   }}
                 >
                   {started
-                    ? `${project.itemLabel} ${project.currentDay} · ${project.completionPercentage}%`
+                    ? `${project.itemLabel ?? "Day"} ${project.currentDay} · ${project.completionPercentage}%`
                     : "Not started"}
                 </span>
               </div>
@@ -100,7 +100,7 @@ export default function ProjectsIndexPage() {
               </p>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                {project.tags.map((tag) => (
+                {(project.tags ?? []).map((tag) => (
                   <span
                     key={tag}
                     className="text-[11px] px-2 py-0.5 rounded-md border text-[var(--muted)]"
@@ -130,7 +130,7 @@ export default function ProjectsIndexPage() {
               >
                 <span className="text-sm text-[var(--muted)]">
                   {project.daysCompleted}/{project.totalDays}{" "}
-                  {project.itemLabel.toLowerCase()}s done
+                  {(project.itemLabel ?? "Day").toLowerCase()}s done
                 </span>
                 <span
                   className="inline-flex items-center gap-1 text-sm font-medium"
